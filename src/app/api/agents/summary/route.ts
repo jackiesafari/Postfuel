@@ -50,7 +50,7 @@ export async function POST(request: Request) {
       const formData = new FormData();
       formData.append("file", pdfBlob, "source.pdf");
 
-      const pythonRes = await fetch("http://127.0.0.1:8000/summarize", {
+      const pythonRes = await fetch(process.env.PYTHON_SUMMARY_SERVICE_URL, {
         method: "POST",
         body: formData,
       });
@@ -68,6 +68,7 @@ export async function POST(request: Request) {
         evidence: [],
         warnings: [],
         agentVersion: AGENT_VERSION,
+        sources: [],
       };
     } else {
       result = await generateSummary({
