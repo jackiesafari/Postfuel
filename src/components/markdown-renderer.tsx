@@ -52,13 +52,13 @@ export function MarkdownRenderer({ markdown }: { markdown: string }) {
               {children}
             </pre>
           ),
-          code: ({ inline, children }) =>
-            inline ? (
+          code: ({ className, children }) =>
+            className ? (
+              <code className="font-mono text-[0.95em] text-[#f4e7db]">{children}</code>
+            ) : (
               <code className="rounded-md bg-white/[0.05] px-2 py-1 font-mono text-[0.92em] text-[#ffd0ad]">
                 {children}
               </code>
-            ) : (
-              <code className="font-mono text-[0.95em] text-[#f4e7db]">{children}</code>
             ),
           a: ({ href, children }) => (
             <a
