@@ -1,6 +1,6 @@
+import { PostFuelBrand } from "@/components/postfuel-brand";
 import { RecentDrafts } from "@/components/recent-drafts";
 import { StudioForm } from "@/components/studio-form";
-import { Badge } from "@/components/ui/badge";
 import { listDrafts } from "@/lib/draft-store";
 
 export const dynamic = "force-dynamic";
@@ -11,19 +11,18 @@ export default async function Home() {
   return (
     <main className="min-h-screen bg-[#090909] px-6 py-8 text-white md:px-10">
       <div className="mx-auto max-w-7xl space-y-8">
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div>
-            <Badge className="mb-3">Multi-Agent Content Studio</Badge>
-            <p className="max-w-xl text-sm leading-7 text-[#9a8b82]">
-              Four specialized content agents, one evidence layer, and a review workflow built for
-              editorial confidence.
-            </p>
-          </div>
-          <div className="flex items-center gap-3 text-sm text-[#8f7c70]">
-            <span>Blog</span>
-            <span>Code</span>
-            <span>Summary</span>
-            <span>Social</span>
+        <div className="flex flex-col gap-6 xl:flex-row xl:items-start xl:justify-between">
+          <PostFuelBrand className="max-w-full" />
+
+          <div className="flex flex-wrap items-center gap-3 pt-1">
+            {["Blog", "Code", "Summary", "Social"].map((item) => (
+              <span
+                key={item}
+                className="rounded-full border border-white/10 bg-white/[0.03] px-5 py-3 text-sm font-medium text-[#b89f91] shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] transition-colors duration-200 hover:border-[#d08c57]/50 hover:text-[#f4c59c]"
+              >
+                {item}
+              </span>
+            ))}
           </div>
         </div>
 
@@ -40,4 +39,3 @@ export default async function Home() {
     </main>
   );
 }
-
