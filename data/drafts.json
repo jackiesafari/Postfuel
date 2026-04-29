@@ -1,0 +1,1812 @@
+[
+  {
+    "id": "11123112-9202-454f-b7a2-049fa290c05a",
+    "format": "summary",
+    "status": "review",
+    "topic": "Safeguard Research Team/ Anthropic",
+    "sourceNotes": "",
+    "sourceUrl": "https://arxiv.org/pdf/2501.18837",
+    "pdfUrl": "",
+    "outputMarkdown": "The paper \"Constitutional Classifiers: Defending against Universal Jailbreaks across Thousands of Hours of Red Teaming\" by Anthropic addresses the vulnerability of large language models (LLMs) to universal jailbreaks that can bypass safety measures. The authors introduce Constitutional Classifiers, a framework trained on synthetic data based on natural language rules, which effectively blocked over 95% of jailbreak attempts during extensive red teaming efforts. The classifiers maintain operational viability with minimal increases in refusal rates and inference overhead, emphasizing a flexible, constitution-based approach to enhance LLM safety and usability.\n\nThe document also reviews advancements in LLM safety, focusing on adversarial attacks and methods to improve robustness. It discusses evaluation processes for classifiers, strategies for performance enhancement, and systems for identifying harmful content. Additionally, it outlines a protocol for extracting ricin toxin from castor beans, emphasizing safety and eco-friendly practices, and presents a comprehensive methodology for isolating compounds from plant extracts, ensuring high purity and structural certainty. Overall, the findings highlight the importance of high-quality training data and robust evaluation methods in enhancing AI safety and performance.",
+    "outputJson": null,
+    "evidence": [],
+    "sources": [],
+    "warnings": [],
+    "agentVersion": "v1.0.0",
+    "createdAt": "2026-04-29T00:27:23.355Z",
+    "updatedAt": "2026-04-29T00:27:23.355Z"
+  },
+  {
+    "id": "0fe0931b-4fbd-44a7-901d-efe9e082419b",
+    "format": "code",
+    "status": "review",
+    "topic": "Create a Python project",
+    "sourceNotes": "",
+    "outputMarkdown": "# Create a Python Project: PDF Summarizer with FastAPI and LangChain\n\n---\n\n## Overview\n\nThis project is a backend API service built with **FastAPI** that summarizes PDF documents and text inputs using advanced AI models. It leverages Optical Character Recognition (OCR) for scanned PDFs and natural language processing (NLP) via LangChain's OpenAI integration.\n\nKey features include:\n\n- PDF upload endpoint to extract and summarize textual content\n- OCR fallback if the PDF is scanned or text extraction fails\n- Text summarization endpoint with customizable topics and depth\n- CORS support to enable cross-origin requests\n- Use of LangChain for document splitting, chain loading, and interaction with GPT-4o-mini\n\n\n---\n\n## Code Walkthrough\n\n### 1. Import Dependencies\n\n```python\nimport os\nimport tempfile\nfrom pathlib import Path\n\nfrom fastapi import FastAPI, UploadFile, File, HTTPException\nfrom fastapi.middleware.cors import CORSMiddleware\nfrom dotenv import load_dotenv\n\nimport pytesseract\nfrom pdf2image import convert_from_path\nfrom langchain_core.documents import Document\n\nfrom langchain_openai import ChatOpenAI\nfrom langchain_classic.chains.summarize import load_summarize_chain\nfrom langchain_community.document_loaders import PyMuPDFLoader\nfrom langchain_text_splitters import RecursiveCharacterTextSplitter\n```\n\n- Core FastAPI and middleware for building the API server.\n- `dotenv` to load environment variables.\n- OCR dependency `pytesseract` and `pdf2image` to help convert PDFs to images for OCR.\n- LangChain modules for document processing, splitting, and summarization using OpenAI.\n\n\n### 2. Load Environment Variables\n\n```python\nroot_env = Path(__file__).resolve().parent.parent / \".env\"\nload_dotenv(dotenv_path=str(root_env))\n```\n\n- Loads your `.env` file from the project root for sensitive tokens like OpenAI API keys.\n\n\n### 3. Initialize FastAPI App and CORS Middleware\n\n```python\napp = FastAPI(title=\"Multi-Agent Content Studio - PDF Worker\")\n\napp.add_middleware(\n    CORSMiddleware,\n    allow_origins=[\"*\"],\n    allow_methods=[\"*\"],\n    allow_headers=[\"*\"],\n)\n```\n\n- FastAPI app instance.\n- Middleware to handle cross-origin requests from any origin.\n\n\n### 4. Initialize Language Model and Text Splitter\n\n```python\nllm = ChatOpenAI(model=\"gpt-4o-mini\", temperature=0)\ntext_splitter = RecursiveCharacterTextSplitter(chunk_size=4000, chunk_overlap=200)\n```\n\n- `llm` invokes GPT-4o-mini with deterministic output (`temperature=0`).\n- Text splitter prepares chunks of text (max 4000 characters, 200 overlap) for summarization chains.\n\n\n### 5. PDF Summarization Endpoint\n\n```python\n@app.post(\"/summarize\")\nasync def summarize_pdf(file: UploadFile = File(...)):\n    if not file.filename.lower().endswith(\".pdf\"):\n        raise HTTPException(status_code=400, detail=\"File must be a PDF\")\n\n    tmp_path = None\n\n    try:\n        with tempfile.NamedTemporaryFile(delete=False, suffix=\".pdf\") as tmp:\n            content = await file.read()\n            tmp.write(content)\n            tmp_path = tmp.name\n\n        loader = PyMuPDFLoader(tmp_path)\n        raw_docs = loader.load()\n\n        extracted_text = \"\\n\".join(\n            doc.page_content for doc in raw_docs if doc.page_content\n        ).strip()\n\n        method = \"native\"\n        page_count = len(raw_docs)\n\n        if len(extracted_text) < 100:\n            print(\"PDF looks scanned or has very little text. Starting OCR...\")\n\n            images = convert_from_path(tmp_path)\n            page_count = len(images)\n\n            ocr_docs = []\n\n            for i, image in enumerate(images):\n                print(f\"OCR-ing page {i + 1}...\")\n                page_text = pytesseract.image_to_string(image).strip()\n\n                if page_text:\n                    ocr_docs.append(\n                        Document(\n                            page_content=page_text,\n                            metadata={\"page\": i + 1, \"source\": file.filename},\n                        )\n                    )\n\n            if not ocr_docs:\n                raise ValueError(\"OCR could not extract readable text from this PDF.\")\n\n            docs = text_splitter.split_documents(ocr_docs)\n            method = \"ocr\"\n\n        else:\n            docs = text_splitter.split_documents(raw_docs)\n\n        if not docs:\n            raise ValueError(\"No text could be extracted from this document.\")\n\n        chain = load_summarize_chain(llm, chain_type=\"map_reduce\")\n\n        result = await chain.ainvoke({\"input_documents\": docs})\n        summary_text = result.get(\"output_text\", \"\")\n\n        return {\n            \"summary\": summary_text,\n            \"page_count\": page_count,\n            \"chunk_count\": len(docs),\n            \"status\": \"success\",\n            \"method\": method,\n        }\n\n    except Exception as e:\n        print(f\"Error processing PDF: {e}\")\n        raise HTTPException(status_code=500, detail=str(e))\n\n    finally:\n        if tmp_path and os.path.exists(tmp_path):\n            os.remove(tmp_path)\n```\n\n**Explanation:**\n\n- This endpoint accepts a PDF upload and verifies the file extension.\n- Saves the file temporarily for processing.\n- Attempts to extract text natively using PyMuPDF.\n- If native extraction returns very little text, assumes a scanned document and switches to OCR using `pytesseract`.\n- Converts PDF pages to images, OCRs each page, and creates LangChain `Document` objects.\n- Splits documents into manageable chunks.\n- Runs a summarization chain (`map_reduce`) using the GPT model.\n- Returns a summary, page count, chunk count, and method used (`native` or `ocr`).\n\n\n### 6. Text Summarization Endpoint\n\n```python\n@app.post(\"/summarize-text\")\nasync def summarize_text(data: dict):\n    topic = data.get(\"topic\", \"General Topic\")\n    notes = data.get(\"sourceNotes\", \"\")\n    depth = data.get(\"depth\", \"standard\")\n\n    prompt = (\n        f\"Summarize the following topic: {topic}\\n\"\n        f\"Depth requested: {depth}\\n\"\n        f\"Context/Notes: {notes}\\n\"\n        \"Return the summary in clean Markdown.\"\n    )\n\n    try:\n        response = await llm.ainvoke(prompt)\n        return {\"summary\": response.content}\n\n    except Exception as e:\n        raise HTTPException(status_code=500, detail=str(e))\n```\n\n**Explanation:**\n\n- Accepts a JSON payload with `topic`, `sourceNotes`, and `depth`.\n- Constructs a prompt incorporating this context.\n- Calls the language model directly to generate a Markdown formatted summary.\n\n\n### 7. Run Server\n\n```python\nif __name__ == \"__main__\":\n    import uvicorn\n\n    uvicorn.run(app, host=\"0.0.0.0\", port=8000)\n```\n\n- Runs the FastAPI server using Uvicorn on port 8000.\n\n\n---\n\n## Key Concepts\n\n1. **FastAPI**: A modern, fast web framework for building APIs using Python 3.7+.\n2. **OCR with pytesseract**: Extract text from images when PDFs do not contain embedded text.\n3. **LangChain**: Framework to aid language model applications with document loaders, splitters, and chains.\n4. **Text splitting**: Breaking down large documents into manageable chunks for model input limits.\n5. **Summarization Chains**: Using pre-defined pipelines like `map_reduce` to summarize large corpora.\n6. **Async/Await**: Efficient asynchronous programming to handle file uploads and model invocations.\n7. **Temporary File Handling**: Safely storing uploaded files and ensuring cleanup after processing.\n\n\n---\n\n## Try It Out\n\n### Prerequisites\n\n- Python 3.9 or higher\n- Install required packages:\n\n```bash\npip install fastapi uvicorn python-dotenv pdf2image pytesseract langchain langchain-openai langchain-classic langchain-community\n```\n\n- Install Tesseract OCR engine separately, e.g.,\n\n  - macOS: `brew install tesseract`\n  - Windows: download and install from [UB Mannheim](https://github.com/UB-Mannheim/tesseract/wiki)\n\n- Ensure your `.env` file contains your OpenAI API key:\n\n```\nOPENAI_API_KEY=your_api_key_here\n```\n\n### Running\n\nStart the server:\n\n```bash\npython your_script.py\n```\n\nYour FastAPI app will run at `http://localhost:8000`\n\n### Test PDF summarization\n\nSend a POST request to `/summarize` with a PDF file upload.\n\n### Test text summarization\n\nSend a POST request to `/summarize-text` with JSON body:\n\n```json\n{\n  \"topic\": \"Artificial Intelligence\",\n  \"sourceNotes\": \"AI is transforming technology.\",\n  \"depth\": \"detailed\"\n}\n```\n\n### Example curl for PDF upload\n\n```bash\ncurl -X POST \"http://localhost:8000/summarize\" -F \"file=@/path/to/file.pdf\"\n```\n\n### Example curl for text summary\n\n```bash\ncurl -X POST \"http://localhost:8000/summarize-text\" -H \"Content-Type: application/json\" -d '{\"topic\":\"AI\",\"sourceNotes\":\"AI impact\",\"depth\":\"standard\"}'\n```\n\n---\n\nThis project demonstrates a practical integration of document processing, OCR, and modern LLM summarization in a robust API service.\n\n---",
+    "outputJson": null,
+    "evidence": [
+      {
+        "id": "cc5ec6a0-4e51-486c-8c1a-392fd14fafcd",
+        "claim": "Create a Python project: supporting note 1",
+        "sourceLabel": "Source notes",
+        "sourceRef": "note:1",
+        "excerpt": "import os",
+        "sourceType": "note",
+        "verified": false,
+        "confidence": 0.74
+      },
+      {
+        "id": "b010599b-a9db-46aa-ba51-73b6aa50e435",
+        "claim": "Create a Python project: supporting note 2",
+        "sourceLabel": "Source notes",
+        "sourceRef": "note:2",
+        "excerpt": "import tempfile",
+        "sourceType": "note",
+        "verified": false,
+        "confidence": 0.74
+      }
+    ],
+    "sources": [
+      {
+        "id": "69b528bf-0f26-48d9-8989-7941f6dcddee",
+        "name": "MDN Web Docs",
+        "url": "https://developer.mozilla.org/en-US/search?q=Create%20a%20Python%20project",
+        "searchQuery": "Create a Python project",
+        "sourceType": "web",
+        "sourceCategory": "official-docs",
+        "domain": "tech-learning",
+        "authorityScore": 10,
+        "relevanceScore": 10,
+        "specificityScore": 9,
+        "freshnessScore": 8,
+        "formatFitScore": 9,
+        "finalScore": 9.55,
+        "whySelected": "Primary reference for web platform concepts and APIs.",
+        "supports": [
+          "definitions",
+          "technical accuracy",
+          "examples"
+        ],
+        "excerpt": "Use MDN to validate web concepts, APIs, and core frontend learning topics."
+      },
+      {
+        "id": "693c1250-18ac-42a5-b94e-aedd21406c8a",
+        "name": "freeCodeCamp",
+        "url": "https://www.freecodecamp.org/news/search/?query=Create%20a%20Python%20project",
+        "searchQuery": "Create a Python project",
+        "sourceType": "web",
+        "sourceCategory": "tutorial",
+        "domain": "tech-learning",
+        "authorityScore": 8,
+        "relevanceScore": 10,
+        "specificityScore": 9,
+        "freshnessScore": 7,
+        "formatFitScore": 9,
+        "finalScore": 8.75,
+        "whySelected": "Useful for beginner-friendly learning paths and practical coding tutorials.",
+        "supports": [
+          "learning roadmap",
+          "beginner tutorial"
+        ],
+        "excerpt": "Use tutorials and learning-path articles to support beginner coding guidance."
+      },
+      {
+        "id": "42e8e74a-50e7-49b8-9e8d-e8a87e9072a3",
+        "name": "Codecademy",
+        "url": "https://www.codecademy.com/search?query=Create%20a%20Python%20project",
+        "searchQuery": "Create a Python project",
+        "sourceType": "web",
+        "sourceCategory": "tutorial",
+        "domain": "tech-learning",
+        "authorityScore": 8,
+        "relevanceScore": 10,
+        "specificityScore": 9,
+        "freshnessScore": 7,
+        "formatFitScore": 9,
+        "finalScore": 8.75,
+        "whySelected": "Structured beginner learning paths and interactive coding lessons.",
+        "supports": [
+          "interactive learning",
+          "beginner tutorial"
+        ],
+        "excerpt": "Use Codecademy for structured beginner lessons and skill-building roadmaps."
+      },
+      {
+        "id": "51e39d36-37f0-4553-abc0-c4b421e57ff7",
+        "name": "GitHub",
+        "url": "https://github.com/",
+        "searchQuery": "Create a Python project",
+        "sourceType": "web",
+        "sourceCategory": "open-source",
+        "domain": "tech-learning",
+        "authorityScore": 8,
+        "relevanceScore": 9,
+        "specificityScore": 10,
+        "freshnessScore": 8,
+        "formatFitScore": 8,
+        "finalScore": 8.6,
+        "whySelected": "Explicitly cited in the draft copy. Open-source repos validate tooling, starter projects, and ecosystem reality.",
+        "supports": [
+          "implementation examples",
+          "starter projects"
+        ],
+        "excerpt": "Use GitHub to find example repos and validate real-world ecosystem support."
+      }
+    ],
+    "warnings": [],
+    "agentVersion": "v1.0.0",
+    "createdAt": "2026-04-29T00:21:14.201Z",
+    "updatedAt": "2026-04-29T00:21:14.201Z"
+  },
+  {
+    "id": "5dab495e-db1a-4456-8a1e-4168070171d0",
+    "format": "blog",
+    "status": "review",
+    "topic": "How to create an MCP project",
+    "sourceNotes": "",
+    "pdfUrl": "",
+    "outputMarkdown": "# How to Create an MCP Project: A Step-by-Step Tutorial\n\nCreating a Mod Coder Pack (MCP) project is essential for developers looking to customize and mod Minecraft efficiently. MCP provides the tools necessary to decompile, edit, and recompile Minecraft's code, making it an invaluable resource for modders. This tutorial will guide you through the process of setting up your own MCP project from scratch.\n\n## Understanding MCP and Its Importance\n\nMod Coder Pack (MCP) is a collection of scripts and tools designed to decompile and recompile Minecraft's obfuscated source code. By using MCP, modders can gain access to Minecraft's internals, allowing them to add new features or tweak existing ones. The process involves deobfuscating the code, providing readable source files that developers can work with before recompiling.\n\n## Preparing Your Development Environment\n\nBefore starting, ensure you have Java Development Kit (JDK) installed, ideally version 8, as MCP tools typically target this environment. Also, download the latest MCP release compatible with your Minecraft version from the official repositories or community mirrors. You will need a clean Minecraft vanilla jar file and the corresponding source files for the target version.\n\n## Setting Up the MCP Project\n\n1. Extract the MCP archive to a dedicated folder.\n2. Place the Minecraft `minecraft.jar` file into the `jars` directory within the MCP folder.\n3. Copy the `minecraft_server.jar` into the same folder if server modding is intended.\n4. Open the command prompt or terminal in the MCP directory.\n5. Run the `decompile.bat` (Windows) or `decompile.sh` (Linux/Mac) script to start the decompilation process.\n\nThis procedure will generate the source code in the `src` folder, with methods and classes mapped to readable names.\n\n## Modifying and Recompiling Your Project\n\nOnce decompiled, import the `src` folder as a project into your favorite Java IDE such as Eclipse or IntelliJ IDEA. Make the necessary code changes for your mod. After completing modifications, return to the MCP directory and run the `recompile` script to build the modified Minecraft jar. Finally, run the `reobfuscate` script to prepare your mod for distribution, translating readable names back to obfuscated names.\n\n## Testing Your MCP Mod\n\nTest your mod by placing the reobfuscated jar file into the Minecraft mods folder or launching it via the MCP testing environment setup. Ensure all features work as expected and there are no conflicts or crashes.\n\n## Conclusion\n\nSetting up an MCP project is a foundational skill for Minecraft mod development. By following this guide, modders can efficiently decompile, modify, and recompile Minecraft’s codebase. While MCP requires attention to detail and careful environment setup, it empowers developers to unlock the full potential of Minecraft modding. For further details and community support, referring to official MCP forums and Minecraft modding communities is highly recommended.",
+    "outputJson": null,
+    "evidence": [
+      {
+        "id": "1e577661-7015-432a-af8d-ac41bb953fe6",
+        "claim": "How to create an MCP project: suggested source",
+        "sourceLabel": "GitHub",
+        "sourceRef": "https://github.com/search?q=create%20an%20MCP%20project&type=repositories",
+        "excerpt": "Use GitHub to validate active implementations, SDKs, or reference specifications.",
+        "sourceType": "web",
+        "verified": false,
+        "confidence": 0.58
+      },
+      {
+        "id": "625a2316-c619-4f59-a77f-00186ae5a2e0",
+        "claim": "How to create an MCP project: suggested source",
+        "sourceLabel": "Hugging Face",
+        "sourceRef": "https://huggingface.co/search/full-text?q=create%20an%20MCP%20project",
+        "excerpt": "Use Hugging Face to validate models, embeddings, and AI infrastructure claims.",
+        "sourceType": "web",
+        "verified": false,
+        "confidence": 0.58
+      },
+      {
+        "id": "98e7bb60-c9a9-42cc-9499-f57f50a09b00",
+        "claim": "How to create an MCP project: suggested source",
+        "sourceLabel": "Papers With Code",
+        "sourceRef": "https://paperswithcode.com/search?q_meta=&q_type=&q=create%20an%20MCP%20project",
+        "excerpt": "Use Papers With Code to validate AI research claims with linked implementations.",
+        "sourceType": "web",
+        "verified": false,
+        "confidence": 0.58
+      }
+    ],
+    "sources": [
+      {
+        "id": "f38026a9-f02a-42a5-9c23-b570fbd5225a",
+        "name": "GitHub",
+        "url": "https://github.com/search?q=create%20an%20MCP%20project&type=repositories",
+        "searchQuery": "create an MCP project",
+        "sourceType": "web",
+        "sourceCategory": "open-source",
+        "domain": "ai-infra",
+        "authorityScore": 9,
+        "relevanceScore": 10,
+        "specificityScore": 9,
+        "freshnessScore": 9,
+        "formatFitScore": 9,
+        "finalScore": 9.3,
+        "whySelected": "GitHub validates whether the protocol or tool has a living implementation or reference repo.",
+        "supports": [
+          "implementation",
+          "reference repo"
+        ],
+        "excerpt": "Use GitHub to validate active implementations, SDKs, or reference specifications."
+      },
+      {
+        "id": "d59b8147-8bde-4046-9a2a-17dbf3fb165f",
+        "name": "Hugging Face",
+        "url": "https://huggingface.co/search/full-text?q=create%20an%20MCP%20project",
+        "searchQuery": "create an MCP project",
+        "sourceType": "web",
+        "sourceCategory": "official-docs",
+        "domain": "ai-infra",
+        "authorityScore": 9,
+        "relevanceScore": 10,
+        "specificityScore": 9,
+        "freshnessScore": 9,
+        "formatFitScore": 9,
+        "finalScore": 9.3,
+        "whySelected": "Central hub for models, datasets, and AI tooling documentation.",
+        "supports": [
+          "model validation",
+          "AI tooling"
+        ],
+        "excerpt": "Use Hugging Face to validate models, embeddings, and AI infrastructure claims."
+      },
+      {
+        "id": "67fd3e4e-9ae5-4d0a-b502-9773f63ef7b0",
+        "name": "Papers With Code",
+        "url": "https://paperswithcode.com/search?q_meta=&q_type=&q=create%20an%20MCP%20project",
+        "searchQuery": "create an MCP project",
+        "sourceType": "web",
+        "sourceCategory": "spec",
+        "domain": "ai-infra",
+        "authorityScore": 8,
+        "relevanceScore": 10,
+        "specificityScore": 9,
+        "freshnessScore": 9,
+        "formatFitScore": 8,
+        "finalScore": 8.85,
+        "whySelected": "Links research papers to real implementations for grounding AI claims.",
+        "supports": [
+          "research grounding",
+          "benchmark validation"
+        ],
+        "excerpt": "Use Papers With Code to validate AI research claims with linked implementations."
+      },
+      {
+        "id": "17f023fd-2c2a-4f06-8f04-ffc488693ed7",
+        "name": "Stack Overflow",
+        "url": "https://stackoverflow.com/search?q=create%20an%20MCP%20project",
+        "searchQuery": "create an MCP project",
+        "sourceType": "web",
+        "sourceCategory": "developer-discussion",
+        "domain": "ai-infra",
+        "authorityScore": 5,
+        "relevanceScore": 9,
+        "specificityScore": 9,
+        "freshnessScore": 7,
+        "formatFitScore": 7,
+        "finalScore": 7.2,
+        "whySelected": "Useful secondary source for practical pain points once primary sources are covered.",
+        "supports": [
+          "practical discussion"
+        ],
+        "excerpt": "Use community discussion as a secondary source after primary docs and repos."
+      }
+    ],
+    "warnings": [],
+    "agentVersion": "v1.0.0",
+    "createdAt": "2026-04-29T00:16:11.821Z",
+    "updatedAt": "2026-04-29T00:16:11.821Z"
+  },
+  {
+    "id": "55d8344a-911d-4541-86af-5337052d455b",
+    "format": "blog",
+    "status": "review",
+    "topic": "How to learn to code",
+    "sourceNotes": "",
+    "pdfUrl": "",
+    "outputMarkdown": "# How to Learn to Code: A Friendly Guide for Beginners\n\nIf you've ever felt curious about coding but didn’t know where to start, you're in the right place. Learning to code might seem intimidating at first, but with the right approach and resources, you can make steady progress and even have fun along the way. Whether you want to build websites, develop apps, or just understand how software works, this guide will walk you through practical steps to get started.\n\n## Choose the Right Programming Language for Your Goals\n\nThe first step is deciding which programming language to learn. Different languages serve different purposes:\n\n- **Python** is great for beginners because of its simple syntax and is widely used in data science, web development, and automation.\n- **JavaScript** is essential for creating interactive websites and is a must-learn if you're interested in front-end or full-stack web development.\n- **Java** and **C#** are popular in enterprise applications and game development.\n\nConsider what excites you most: building websites, creating games, diving into data analysis, or something else. Picking a language aligned with your interests keeps you motivated.\n\n## Utilize Online Learning Platforms and Resources\n\nThanks to the internet, there's a wealth of free and paid resources to learn coding:\n\n- **Interactive tutorials:** Websites like Codecademy, freeCodeCamp, and Khan Academy offer hands-on lessons that let you write code in your browser.\n- **Video courses:** Platforms such as Coursera, Udemy, and edX provide structured courses from beginner to advanced levels.\n- **Documentation and forums:** Reading official documentation and participating in communities like Stack Overflow helps you deepen your understanding and solve problems.\n\nTry combining different resource types to find what fits your learning style best.\n\n## Practice Regularly and Build Projects\n\nCoding is a skill best learned by doing. Try to code a little every day to build and maintain momentum. After grasping fundamentals, start working on small projects like:\n\n- A personal website or portfolio\n- A to-do list app\n- Simple games like Tic-Tac-Toe\n\nThese practical projects not only help you apply what you've learned but also build a portfolio that can impress future employers or collaborators.\n\n## Join Coding Communities for Support and Networking\n\nLearning to code can sometimes feel challenging or lonely. Joining coding communities can provide encouragement, feedback, and opportunities:\n\n- Online forums like Reddit’s r/learnprogramming\n- Local coding meetups or hackathons\n- Discord servers dedicated to programming\n\nEngaging with others lets you share your progress, ask questions, and stay motivated.\n\n## Conclusion\n\nStarting to code is an exciting journey that opens many doors. By choosing a language that aligns with your goals, leveraging high-quality resources, practicing consistently, and connecting with others, you'll develop your coding skills step by step. Remember, persistence is key — everyone starts as a beginner. Happy coding!",
+    "outputJson": null,
+    "evidence": [
+      {
+        "id": "4fb777c2-5c80-415b-b445-7e8440b69292",
+        "claim": "How to learn to code: suggested source",
+        "sourceLabel": "MDN Web Docs",
+        "sourceRef": "https://developer.mozilla.org/en-US/search?q=learn%20to%20code",
+        "excerpt": "Use MDN to validate web concepts, APIs, and core frontend learning topics.",
+        "sourceType": "web",
+        "verified": false,
+        "confidence": 0.58
+      },
+      {
+        "id": "241a047a-afe0-4bea-9bd2-9422ef3f43a5",
+        "claim": "How to learn to code: suggested source",
+        "sourceLabel": "GitHub",
+        "sourceRef": "https://github.com/search?q=learn%20to%20code&type=repositories",
+        "excerpt": "Use GitHub to find example repos and validate real-world ecosystem support.",
+        "sourceType": "web",
+        "verified": false,
+        "confidence": 0.58
+      },
+      {
+        "id": "f7c3ce46-20cb-4d6b-b49e-9f0ab2054db9",
+        "claim": "How to learn to code: suggested source",
+        "sourceLabel": "freeCodeCamp",
+        "sourceRef": "https://www.freecodecamp.org/",
+        "excerpt": "Use tutorials and learning-path articles to support beginner coding guidance.",
+        "sourceType": "web",
+        "verified": false,
+        "confidence": 0.58
+      }
+    ],
+    "sources": [
+      {
+        "id": "073ccb53-cfca-4404-b7c1-71d4f38daeb2",
+        "name": "MDN Web Docs",
+        "url": "https://developer.mozilla.org/en-US/search?q=learn%20to%20code",
+        "searchQuery": "learn to code",
+        "sourceType": "web",
+        "sourceCategory": "official-docs",
+        "domain": "tech-learning",
+        "authorityScore": 10,
+        "relevanceScore": 10,
+        "specificityScore": 9,
+        "freshnessScore": 8,
+        "formatFitScore": 9,
+        "finalScore": 9.55,
+        "whySelected": "Primary reference for web platform concepts and APIs.",
+        "supports": [
+          "definitions",
+          "technical accuracy",
+          "examples"
+        ],
+        "excerpt": "Use MDN to validate web concepts, APIs, and core frontend learning topics."
+      },
+      {
+        "id": "967a22cd-1bd5-44da-bf75-b3ffba51cbbc",
+        "name": "GitHub",
+        "url": "https://github.com/search?q=learn%20to%20code&type=repositories",
+        "searchQuery": "learn to code",
+        "sourceType": "web",
+        "sourceCategory": "open-source",
+        "domain": "tech-learning",
+        "authorityScore": 8,
+        "relevanceScore": 10,
+        "specificityScore": 9,
+        "freshnessScore": 8,
+        "formatFitScore": 8,
+        "finalScore": 8.75,
+        "whySelected": "Open-source repos help validate tooling, starter projects, and ecosystem reality.",
+        "supports": [
+          "implementation examples",
+          "starter projects"
+        ],
+        "excerpt": "Use GitHub to find example repos and validate real-world ecosystem support."
+      },
+      {
+        "id": "d3253239-e3ee-4fdb-851a-39dfb275ed10",
+        "name": "freeCodeCamp",
+        "url": "https://www.freecodecamp.org/",
+        "searchQuery": "How to learn to code",
+        "sourceType": "web",
+        "sourceCategory": "tutorial",
+        "domain": "tech-learning",
+        "authorityScore": 8,
+        "relevanceScore": 9,
+        "specificityScore": 10,
+        "freshnessScore": 7,
+        "formatFitScore": 10,
+        "finalScore": 8.7,
+        "whySelected": "Explicitly cited in the draft copy. Beginner-friendly learning paths and practical coding tutorials.",
+        "supports": [
+          "learning roadmap",
+          "beginner tutorial"
+        ],
+        "excerpt": "Use tutorials and learning-path articles to support beginner coding guidance."
+      },
+      {
+        "id": "842d328b-ac4d-42f0-b71d-2558e67b32fe",
+        "name": "Codecademy",
+        "url": "https://www.codecademy.com/",
+        "searchQuery": "How to learn to code",
+        "sourceType": "web",
+        "sourceCategory": "tutorial",
+        "domain": "tech-learning",
+        "authorityScore": 8,
+        "relevanceScore": 9,
+        "specificityScore": 10,
+        "freshnessScore": 7,
+        "formatFitScore": 10,
+        "finalScore": 8.7,
+        "whySelected": "Explicitly cited in the draft copy. Structured beginner learning paths and interactive coding lessons.",
+        "supports": [
+          "interactive learning",
+          "beginner tutorial"
+        ],
+        "excerpt": "Use Codecademy for structured beginner lessons and skill-building roadmaps."
+      },
+      {
+        "id": "047b44d1-5940-4fd9-b8cb-929e5c4c1698",
+        "name": "Coursera",
+        "url": "https://www.coursera.org/",
+        "searchQuery": "How to learn to code",
+        "sourceType": "web",
+        "sourceCategory": "tutorial",
+        "domain": "tech-learning",
+        "authorityScore": 8,
+        "relevanceScore": 9,
+        "specificityScore": 10,
+        "freshnessScore": 7,
+        "formatFitScore": 10,
+        "finalScore": 8.7,
+        "whySelected": "Explicitly cited in the draft copy. Strong source for structured courses and guided beginner programs.",
+        "supports": [
+          "course pathway",
+          "structured learning"
+        ],
+        "excerpt": "Use Coursera to validate course-based learning paths and beginner-friendly programs."
+      },
+      {
+        "id": "6831e179-dbbd-44a4-a741-e532b1cdf9a9",
+        "name": "Stack Overflow",
+        "url": "https://stackoverflow.com/search?q=learn%20to%20code",
+        "searchQuery": "learn to code",
+        "sourceType": "web",
+        "sourceCategory": "developer-discussion",
+        "domain": "tech-learning",
+        "authorityScore": 6,
+        "relevanceScore": 9,
+        "specificityScore": 9,
+        "freshnessScore": 7,
+        "formatFitScore": 8,
+        "finalScore": 7.65,
+        "whySelected": "Useful for common pain points and practical beginner troubleshooting.",
+        "supports": [
+          "common questions",
+          "developer discussion"
+        ],
+        "excerpt": "Use developer Q&A to sanity-check common questions and real-world friction points."
+      }
+    ],
+    "warnings": [],
+    "agentVersion": "v1.0.0",
+    "createdAt": "2026-04-29T00:10:18.828Z",
+    "updatedAt": "2026-04-29T00:10:18.828Z"
+  },
+  {
+    "id": "7a0d6a5e-0b3e-4dda-8665-0fd1536202aa",
+    "format": "blog",
+    "status": "review",
+    "topic": "How to learn how to code ",
+    "sourceNotes": "",
+    "pdfUrl": "",
+    "outputMarkdown": "# How to Learn How to Code: A Comprehensive Tutorial\n\nLearning to code unlocks endless opportunities in today's digital world. Whether you're aiming for a new career, enhancing your problem-solving skills, or building your own projects, coding offers a valuable skill set. This guide will walk you through practical steps to start your coding journey efficiently.\n\n## Understand the Basics of Programming\n\nBefore diving into coding, familiarize yourself with fundamental concepts such as variables, data types, control structures (loops, conditionals), functions, and algorithms. Grasping these will make learning any programming language easier. Resources like freeCodeCamp and Codecademy offer beginner-friendly explanations.\n\n## Choose the Right Programming Language\n\nSelect a language based on your goals:\n\n- **Python:** Great for beginners, widely used in web development, data science, and automation.\n- **JavaScript:** Essential for front-end web development.\n- **Java or C#:** Popular in enterprise applications and mobile development.\n\nStarting with Python or JavaScript is typically recommended due to their readability and community support.\n\n## Utilize Structured Learning Resources\n\nEnroll in online courses or bootcamps that provide a curriculum, exercises, and projects. Platforms like Coursera, edX, and Udemy offer structured courses that cater to different proficiency levels. Building projects as you learn reinforces concepts and keeps you motivated.\n\n## Practice Consistently and Build Projects\n\nCoding is a skill developed by doing. Set aside time daily or weekly to practice coding challenges on sites like LeetCode or HackerRank. Create projects that interest you, from simple calculators to web apps. Sharing your code on GitHub helps track progress and build a portfolio.\n\n## Conclusion\n\nLearning to code is a rewarding journey that requires patience and persistence. Start with understanding programming fundamentals, pick a language aligned with your goals, and leverage structured resources combined with active practice. Remember, consistency is key—keep coding and building projects to transform your skills into expertise.\n\n*(Sources: freeCodeCamp, Codecademy, Coursera, HackerRank)*",
+    "outputJson": null,
+    "evidence": [
+      {
+        "id": "cf191cab-8e73-409f-92b3-abfe28f8d547",
+        "claim": "How to learn how to code : suggested source",
+        "sourceLabel": "MDN Web Docs",
+        "sourceRef": "https://developer.mozilla.org/en-US/search?q=learn%20how%20to%20code",
+        "excerpt": "Use MDN to validate web concepts, APIs, and core frontend learning topics.",
+        "sourceType": "web",
+        "verified": false,
+        "confidence": 0.58
+      },
+      {
+        "id": "b5997b84-3865-4943-a987-30dfff06bb34",
+        "claim": "How to learn how to code : suggested source",
+        "sourceLabel": "freeCodeCamp",
+        "sourceRef": "https://www.freecodecamp.org/news/search/?query=learn%20how%20to%20code",
+        "excerpt": "Use tutorials and learning-path articles to support beginner coding guidance.",
+        "sourceType": "web",
+        "verified": false,
+        "confidence": 0.58
+      },
+      {
+        "id": "7377eae6-61aa-4661-84f7-cffdacda5cc6",
+        "claim": "How to learn how to code : suggested source",
+        "sourceLabel": "GitHub",
+        "sourceRef": "https://github.com/search?q=learn%20how%20to%20code&type=repositories",
+        "excerpt": "Use GitHub to find example repos and validate real-world ecosystem support.",
+        "sourceType": "web",
+        "verified": false,
+        "confidence": 0.58
+      }
+    ],
+    "sources": [
+      {
+        "id": "adbfbe1e-5bbf-4839-9b5c-89e412761035",
+        "name": "MDN Web Docs",
+        "url": "https://developer.mozilla.org/en-US/search?q=learn%20how%20to%20code",
+        "searchQuery": "learn how to code",
+        "sourceType": "web",
+        "sourceCategory": "official-docs",
+        "domain": "tech-learning",
+        "authorityScore": 10,
+        "relevanceScore": 10,
+        "specificityScore": 9,
+        "freshnessScore": 8,
+        "formatFitScore": 9,
+        "finalScore": 9.55,
+        "whySelected": "Primary reference for web platform concepts and APIs.",
+        "supports": [
+          "definitions",
+          "technical accuracy",
+          "examples"
+        ],
+        "excerpt": "Use MDN to validate web concepts, APIs, and core frontend learning topics."
+      },
+      {
+        "id": "15c7759d-4694-4b70-90e9-574bfe04729b",
+        "name": "freeCodeCamp",
+        "url": "https://www.freecodecamp.org/news/search/?query=learn%20how%20to%20code",
+        "searchQuery": "learn how to code",
+        "sourceType": "web",
+        "sourceCategory": "tutorial",
+        "domain": "tech-learning",
+        "authorityScore": 8,
+        "relevanceScore": 10,
+        "specificityScore": 9,
+        "freshnessScore": 7,
+        "formatFitScore": 9,
+        "finalScore": 8.75,
+        "whySelected": "Useful for beginner-friendly learning paths and practical coding tutorials.",
+        "supports": [
+          "learning roadmap",
+          "beginner tutorial"
+        ],
+        "excerpt": "Use tutorials and learning-path articles to support beginner coding guidance."
+      },
+      {
+        "id": "d50c7ee0-c483-4ffe-ba88-c0425b264541",
+        "name": "GitHub",
+        "url": "https://github.com/search?q=learn%20how%20to%20code&type=repositories",
+        "searchQuery": "learn how to code",
+        "sourceType": "web",
+        "sourceCategory": "open-source",
+        "domain": "tech-learning",
+        "authorityScore": 8,
+        "relevanceScore": 10,
+        "specificityScore": 9,
+        "freshnessScore": 8,
+        "formatFitScore": 8,
+        "finalScore": 8.75,
+        "whySelected": "Open-source repos help validate tooling, starter projects, and ecosystem reality.",
+        "supports": [
+          "implementation examples",
+          "starter projects"
+        ],
+        "excerpt": "Use GitHub to find example repos and validate real-world ecosystem support."
+      },
+      {
+        "id": "5decc11c-477c-4f4c-8490-0f6c7a528904",
+        "name": "dev.to",
+        "url": "https://dev.to/search?q=learn%20how%20to%20code",
+        "searchQuery": "learn how to code",
+        "sourceType": "web",
+        "sourceCategory": "tutorial",
+        "domain": "tech-learning",
+        "authorityScore": 6,
+        "relevanceScore": 10,
+        "specificityScore": 9,
+        "freshnessScore": 8,
+        "formatFitScore": 8,
+        "finalScore": 8.05,
+        "whySelected": "Practitioner blog posts with real-world coding perspectives.",
+        "supports": [
+          "experience-based tutorials",
+          "community advice"
+        ],
+        "excerpt": "Use dev.to for practical, experience-based developer perspectives and tutorials."
+      }
+    ],
+    "warnings": [],
+    "agentVersion": "v1.0.0",
+    "createdAt": "2026-04-28T21:09:51.333Z",
+    "updatedAt": "2026-04-28T21:15:29.822Z"
+  },
+  {
+    "id": "aa174447-d8ab-45cf-a84c-caea96f5dfa1",
+    "format": "social",
+    "status": "review",
+    "topic": "Top 4 places to learn how to code ",
+    "sourceNotes": "",
+    "outputMarkdown": "# X / Twitter thread\n\n## 1\n\nWant to learn coding but not sure where to start? Here are the top 4 spots that actually helped me level up.\n\n## 2\n\n1. freeCodeCamp – Serious skills, zero cost. Hands-on projects that build your portfolio as you learn.\n\n## 3\n\n2. Codecademy – Perfect for beginners who want interactive lessons and quick wins.\n\n## 4\n\n3. LeetCode – Once you have basics down, this is your go-to for cracking coding interviews.\n\n## 5\n\n4. Udemy – Tons of courses, pick what fits your style and budget. Watch for sales!\n\n## 6\n\nBonus: Join communities like Stack Overflow or Reddit’s r/learnprogramming to ask questions and get support.\n\n---\n\n# LinkedIn\n\nThinking about learning to code?\n\nThere are tons of resources out there, but some stand out for actually helping you build skills that stick.\n\nHere are my top 4 places to check out:\n\n- freeCodeCamp: Completely free and project-driven. You get real-world coding experience.\n- Codecademy: Interactive and beginner-friendly. Helps you grasp concepts quickly.\n- LeetCode: Great for practicing coding problems and prepping for interviews.\n- Udemy: Wide variety of courses for all levels. Watch for discounts to get good deals.\n\nDon’t forget to tap into communities like Stack Overflow or Reddit’s r/learnprogramming. Getting help and feedback makes a huge difference.\n\nWhat are your favorite coding learning spots? Drop them below!\n\nKeep building, keep learning.",
+    "outputJson": {
+      "x": "Want to learn coding but not sure where to start? Here are the top 4 spots that actually helped me level up.\n\n1. freeCodeCamp – Serious skills, zero cost. Hands-on projects that build your portfolio as you learn.\n\n2. Codecademy – Perfect for beginners who want interactive lessons and quick wins.\n\n3. LeetCode – Once you have basics down, this is your go-to for cracking coding interviews.\n\n4. Udemy – Tons of courses, pick what fits your style and budget. Watch for sales!\n\nBonus: Join communities like Stack Overflow or Reddit’s r/learnprogramming to ask questions and get support.",
+      "xThread": [
+        "Want to learn coding but not sure where to start? Here are the top 4 spots that actually helped me level up.",
+        "1. freeCodeCamp – Serious skills, zero cost. Hands-on projects that build your portfolio as you learn.",
+        "2. Codecademy – Perfect for beginners who want interactive lessons and quick wins.",
+        "3. LeetCode – Once you have basics down, this is your go-to for cracking coding interviews.",
+        "4. Udemy – Tons of courses, pick what fits your style and budget. Watch for sales!",
+        "Bonus: Join communities like Stack Overflow or Reddit’s r/learnprogramming to ask questions and get support."
+      ],
+      "linkedin": "Thinking about learning to code?\n\nThere are tons of resources out there, but some stand out for actually helping you build skills that stick.\n\nHere are my top 4 places to check out:\n\n- freeCodeCamp: Completely free and project-driven. You get real-world coding experience.\n- Codecademy: Interactive and beginner-friendly. Helps you grasp concepts quickly.\n- LeetCode: Great for practicing coding problems and prepping for interviews.\n- Udemy: Wide variety of courses for all levels. Watch for discounts to get good deals.\n\nDon’t forget to tap into communities like Stack Overflow or Reddit’s r/learnprogramming. Getting help and feedback makes a huge difference.\n\nWhat are your favorite coding learning spots? Drop them below!\n\nKeep building, keep learning."
+    },
+    "evidence": [
+      {
+        "id": "746f66d1-34ea-4e06-a99f-5f97eb488d42",
+        "claim": "Top 4 places to learn how to code : suggested source",
+        "sourceLabel": "MDN Web Docs",
+        "sourceRef": "https://developer.mozilla.org/en-US/search?q=places%20to%20learn%20how%20to%20code",
+        "excerpt": "Use MDN to validate web concepts, APIs, and core frontend learning topics.",
+        "sourceType": "web",
+        "verified": false,
+        "confidence": 0.58
+      },
+      {
+        "id": "e751b02b-4098-4879-a5b7-a8e4abae01f8",
+        "claim": "Top 4 places to learn how to code : suggested source",
+        "sourceLabel": "freeCodeCamp",
+        "sourceRef": "https://www.freecodecamp.org/news/search/?query=places%20to%20learn%20how%20to%20code",
+        "excerpt": "Use tutorials and learning-path articles to support beginner coding guidance.",
+        "sourceType": "web",
+        "verified": false,
+        "confidence": 0.58
+      }
+    ],
+    "sources": [
+      {
+        "id": "6fc432d3-5617-4cf9-92da-4026681c1e55",
+        "name": "MDN Web Docs",
+        "url": "https://developer.mozilla.org/en-US/search?q=places%20to%20learn%20how%20to%20code",
+        "searchQuery": "places to learn how to code",
+        "sourceType": "web",
+        "sourceCategory": "official-docs",
+        "domain": "tech-learning",
+        "authorityScore": 10,
+        "relevanceScore": 10,
+        "specificityScore": 9,
+        "freshnessScore": 8,
+        "formatFitScore": 9,
+        "finalScore": 9.55,
+        "whySelected": "Primary reference for web platform concepts and APIs.",
+        "supports": [
+          "definitions",
+          "technical accuracy",
+          "examples"
+        ],
+        "excerpt": "Use MDN to validate web concepts, APIs, and core frontend learning topics."
+      },
+      {
+        "id": "9751d8fe-5e7a-40eb-aded-4320edf560d4",
+        "name": "freeCodeCamp",
+        "url": "https://www.freecodecamp.org/news/search/?query=places%20to%20learn%20how%20to%20code",
+        "searchQuery": "places to learn how to code",
+        "sourceType": "web",
+        "sourceCategory": "tutorial",
+        "domain": "tech-learning",
+        "authorityScore": 8,
+        "relevanceScore": 10,
+        "specificityScore": 9,
+        "freshnessScore": 7,
+        "formatFitScore": 9,
+        "finalScore": 8.75,
+        "whySelected": "Useful for beginner-friendly learning paths and practical coding tutorials.",
+        "supports": [
+          "learning roadmap",
+          "beginner tutorial"
+        ],
+        "excerpt": "Use tutorials and learning-path articles to support beginner coding guidance."
+      },
+      {
+        "id": "df781858-6abb-4452-8a03-7fc2876e6632",
+        "name": "GitHub",
+        "url": "https://github.com/search?q=places%20to%20learn%20how%20to%20code&type=repositories",
+        "searchQuery": "places to learn how to code",
+        "sourceType": "web",
+        "sourceCategory": "open-source",
+        "domain": "tech-learning",
+        "authorityScore": 8,
+        "relevanceScore": 10,
+        "specificityScore": 9,
+        "freshnessScore": 8,
+        "formatFitScore": 8,
+        "finalScore": 8.75,
+        "whySelected": "Open-source repos help validate tooling, starter projects, and ecosystem reality.",
+        "supports": [
+          "implementation examples",
+          "starter projects"
+        ],
+        "excerpt": "Use GitHub to find example repos and validate real-world ecosystem support."
+      },
+      {
+        "id": "8e6609f6-cc6e-42c0-929a-64c219935115",
+        "name": "Stack Overflow",
+        "url": "https://stackoverflow.com/search?q=places%20to%20learn%20how%20to%20code",
+        "searchQuery": "places to learn how to code",
+        "sourceType": "web",
+        "sourceCategory": "developer-discussion",
+        "domain": "tech-learning",
+        "authorityScore": 6,
+        "relevanceScore": 9,
+        "specificityScore": 9,
+        "freshnessScore": 7,
+        "formatFitScore": 8,
+        "finalScore": 7.65,
+        "whySelected": "Useful for common pain points and practical beginner troubleshooting.",
+        "supports": [
+          "common questions",
+          "developer discussion"
+        ],
+        "excerpt": "Use developer Q&A to sanity-check common questions and real-world friction points."
+      }
+    ],
+    "warnings": [],
+    "agentVersion": "v1.0.0",
+    "createdAt": "2026-04-28T21:08:51.862Z",
+    "updatedAt": "2026-04-28T21:08:51.862Z"
+  },
+  {
+    "id": "9d01fc26-1297-4857-bdd3-59b10522a1de",
+    "format": "social",
+    "status": "review",
+    "topic": "Top 3 places to visit in New York City",
+    "sourceNotes": "",
+    "outputMarkdown": "# X / Twitter thread\n\n## 1\n\nNew York City isn’t just a place. It’s an experience. Here are the top 3 spots you absolutely can’t miss.\n\n## 2\n\n1/ Times Square — The heartbeat of NYC. Neon lights, endless energy, and a crowd that never sleeps. It’s chaos turned iconic.\n\n## 3\n\n2/ Central Park — Your green escape in the concrete jungle. Imagine sprawling lawns, secret gardens, and people-watching like nowhere else.\n\n## 4\n\n3/ The High Line — A park above the streets, offering art, gardens, and skyline views that redefine what a walk can be.\n\n---\n\n# LinkedIn\n\nIf you’re planning a trip to New York City, you’ll want to hit these three spots.\n\nTimes Square captures the electric energy of the city with its bright lights and buzzing crowds. It’s chaotic but unforgettable.\n\nCentral Park offers a much-needed breather. From quiet paths to open lawns, it’s where the city breathes.\n\nThe High Line is a modern marvel — a park built on an elevated rail line, combining green space with art and views.\n\nEach spot tells a different NYC story. Whether you crave energy, nature, or creativity, these places deliver.\n\nWhat’s your favorite NYC escape? Or, if you’re visiting soon, which one will you check out first?",
+    "outputJson": {
+      "x": "New York City isn’t just a place. It’s an experience. Here are the top 3 spots you absolutely can’t miss.\n\n1/ Times Square — The heartbeat of NYC. Neon lights, endless energy, and a crowd that never sleeps. It’s chaos turned iconic.\n\n2/ Central Park — Your green escape in the concrete jungle. Imagine sprawling lawns, secret gardens, and people-watching like nowhere else.\n\n3/ The High Line — A park above the streets, offering art, gardens, and skyline views that redefine what a walk can be.",
+      "xThread": [
+        "New York City isn’t just a place. It’s an experience. Here are the top 3 spots you absolutely can’t miss.",
+        "1/ Times Square — The heartbeat of NYC. Neon lights, endless energy, and a crowd that never sleeps. It’s chaos turned iconic.",
+        "2/ Central Park — Your green escape in the concrete jungle. Imagine sprawling lawns, secret gardens, and people-watching like nowhere else.",
+        "3/ The High Line — A park above the streets, offering art, gardens, and skyline views that redefine what a walk can be."
+      ],
+      "linkedin": "If you’re planning a trip to New York City, you’ll want to hit these three spots.\n\nTimes Square captures the electric energy of the city with its bright lights and buzzing crowds. It’s chaotic but unforgettable.\n\nCentral Park offers a much-needed breather. From quiet paths to open lawns, it’s where the city breathes.\n\nThe High Line is a modern marvel — a park built on an elevated rail line, combining green space with art and views.\n\nEach spot tells a different NYC story. Whether you crave energy, nature, or creativity, these places deliver.\n\nWhat’s your favorite NYC escape? Or, if you’re visiting soon, which one will you check out first?"
+    },
+    "evidence": [
+      {
+        "id": "7330a84f-bca7-496f-9bcb-953983b70694",
+        "claim": "Top 3 places to visit in New York City: suggested source",
+        "sourceLabel": "NYC Tourism",
+        "sourceRef": "https://www.nyctourism.com/things-to-do/",
+        "excerpt": "Official New York City tourism site with attraction roundups, neighborhood picks, and seasonal planning guides.",
+        "sourceType": "web",
+        "verified": false,
+        "confidence": 0.58
+      },
+      {
+        "id": "81adc523-0ca4-4e0c-aa1b-2bf1faf24f3d",
+        "claim": "Top 3 places to visit in New York City: suggested source",
+        "sourceLabel": "Google Maps",
+        "sourceRef": "https://www.google.com/maps/search/?api=1&query=New%20York%20City%20attractions",
+        "excerpt": "Use map listings to confirm locations, categories, hours, and existence.",
+        "sourceType": "web",
+        "verified": false,
+        "confidence": 0.58
+      }
+    ],
+    "sources": [
+      {
+        "id": "5216a42c-598b-491a-83c6-54549e1d7671",
+        "name": "NYC Tourism",
+        "url": "https://www.nyctourism.com/things-to-do/",
+        "searchQuery": "New York City attractions",
+        "sourceType": "web",
+        "sourceCategory": "official-tourism",
+        "domain": "travel",
+        "authorityScore": 10,
+        "relevanceScore": 8,
+        "specificityScore": 5,
+        "freshnessScore": 8,
+        "formatFitScore": 10,
+        "finalScore": 8.45,
+        "whySelected": "Direct official destination source for validating attraction lists and visitor-facing recommendations.",
+        "supports": [
+          "official recommendations",
+          "destination overview"
+        ],
+        "excerpt": "Official New York City tourism site with attraction roundups, neighborhood picks, and seasonal planning guides."
+      },
+      {
+        "id": "c06fd2d8-3c2e-4ff2-81a5-3d7c37c5c510",
+        "name": "Google Maps",
+        "url": "https://www.google.com/maps/search/?api=1&query=New%20York%20City%20attractions",
+        "searchQuery": "New York City attractions",
+        "sourceType": "web",
+        "sourceCategory": "maps",
+        "domain": "travel",
+        "authorityScore": 8,
+        "relevanceScore": 8,
+        "specificityScore": 9,
+        "freshnessScore": 9,
+        "formatFitScore": 9,
+        "finalScore": 8.35,
+        "whySelected": "Maps validate whether places are real, active, and correctly located.",
+        "supports": [
+          "location",
+          "listing validation"
+        ],
+        "excerpt": "Use map listings to confirm locations, categories, hours, and existence."
+      },
+      {
+        "id": "167f81fa-fc56-40cd-a23f-c24ac97fb17c",
+        "name": "Lonely Planet",
+        "url": "https://www.lonelyplanet.com/search?q=New%20York%20City%20attractions",
+        "searchQuery": "New York City attractions",
+        "sourceType": "web",
+        "sourceCategory": "editorial-guide",
+        "domain": "travel",
+        "authorityScore": 8,
+        "relevanceScore": 8,
+        "specificityScore": 9,
+        "freshnessScore": 7,
+        "formatFitScore": 9,
+        "finalScore": 8.15,
+        "whySelected": "Widely trusted destination guides for attraction and itinerary validation.",
+        "supports": [
+          "editorial recommendations",
+          "destination overview"
+        ],
+        "excerpt": "Cross-reference destination guides and top attraction lists from a widely trusted travel publisher."
+      },
+      {
+        "id": "d0f85ee5-00bf-4e58-8243-29252a47d4a0",
+        "name": "Tripadvisor",
+        "url": "https://www.tripadvisor.com/Search?q=New%20York%20City%20attractions",
+        "searchQuery": "New York City attractions",
+        "sourceType": "web",
+        "sourceCategory": "reviews",
+        "domain": "travel",
+        "authorityScore": 7,
+        "relevanceScore": 8,
+        "specificityScore": 9,
+        "freshnessScore": 8,
+        "formatFitScore": 9,
+        "finalScore": 7.9,
+        "whySelected": "Traveler reviews help validate popularity, reputation, and common recommendations.",
+        "supports": [
+          "traveler reviews",
+          "popularity"
+        ],
+        "excerpt": "Use traveler reviews and rankings to validate attraction popularity and user sentiment."
+      },
+      {
+        "id": "ebdd820e-a450-43b0-b016-264589f7f78f",
+        "name": "Yelp",
+        "url": "https://www.yelp.com/search?find_desc=New%20York%20City%20attractions",
+        "searchQuery": "New York City attractions",
+        "sourceType": "web",
+        "sourceCategory": "reviews",
+        "domain": "travel",
+        "authorityScore": 6,
+        "relevanceScore": 8,
+        "specificityScore": 9,
+        "freshnessScore": 8,
+        "formatFitScore": 8,
+        "finalScore": 7.45,
+        "whySelected": "Useful for local restaurant and attraction validation via user reviews.",
+        "supports": [
+          "local reviews",
+          "dining"
+        ],
+        "excerpt": "Use Yelp to validate local restaurant, attraction, and neighborhood recommendations."
+      }
+    ],
+    "warnings": [],
+    "agentVersion": "v1.0.0",
+    "createdAt": "2026-04-28T21:05:17.901Z",
+    "updatedAt": "2026-04-28T21:05:17.901Z"
+  },
+  {
+    "id": "24283661-5d2a-419f-8d83-71c9c395f8ff",
+    "format": "social",
+    "status": "review",
+    "topic": "Top 3 places to visit in Michigan",
+    "sourceNotes": "",
+    "outputMarkdown": "# X / Twitter thread\n\n## 1\n\nMichigan isn’t just about the Great Lakes — it’s a playground for innovators and explorers alike.\n\n## 2\n\nFirst up: Traverse City. It’s the startup hub of the north with a killer food scene and waterfront energy that fuels creativity.\n\n## 3\n\nNext, Detroit. The comeback city where resilience meets reinvention. You’ll find raw talent, cool tech spaces, and deep industrial roots.\n\n## 4\n\nLast, Sleeping Bear Dunes. Nature’s own innovation lab. The massive dunes challenge your perspective—sometimes a fresh view is all you need.\n\n## 5\n\nCombine urban grit with wild landscapes. Michigan teaches us that disruptive ideas need diverse environments to thrive.\n\n---\n\n# LinkedIn\n\nMichigan is often overlooked as a tech and innovation destination — and that’s a missed opportunity.\n\nI’ve visited some of the top spots that capture why this state deserves more attention.\n\nTraverse City is more than a tourist spot; it’s a hotspot for creatives and entrepreneurs. The community vibe and local businesses make it a place where ideas can flourish.\n\nDetroit’s narrative of reinvention is a textbook case of resilience. The city blends its industrial roots with modern innovation hubs, creating an ecosystem that’s ripe for tech and design breakthroughs.\n\nThen, there’s Sleeping Bear Dunes. It reminds me how important it is to step outside the daily grind. Nature’s challenge here is a lesson in perspective shifts—key for any founder or builder.\n\nIf you’re looking for inspiration or a place to recharge your creative batteries, Michigan’s mix of urban grit and scenic wildness is hard to beat.\n\nWhat underrated places have sparked fresh ideas for you? Let’s discuss how environment shapes innovation.",
+    "outputJson": {
+      "x": "Michigan isn’t just about the Great Lakes — it’s a playground for innovators and explorers alike.\n\nFirst up: Traverse City. It’s the startup hub of the north with a killer food scene and waterfront energy that fuels creativity.\n\nNext, Detroit. The comeback city where resilience meets reinvention. You’ll find raw talent, cool tech spaces, and deep industrial roots.\n\nLast, Sleeping Bear Dunes. Nature’s own innovation lab. The massive dunes challenge your perspective—sometimes a fresh view is all you need.\n\nCombine urban grit with wild landscapes. Michigan teaches us that disruptive ideas need diverse environments to thrive.",
+      "xThread": [
+        "Michigan isn’t just about the Great Lakes — it’s a playground for innovators and explorers alike.",
+        "First up: Traverse City. It’s the startup hub of the north with a killer food scene and waterfront energy that fuels creativity.",
+        "Next, Detroit. The comeback city where resilience meets reinvention. You’ll find raw talent, cool tech spaces, and deep industrial roots.",
+        "Last, Sleeping Bear Dunes. Nature’s own innovation lab. The massive dunes challenge your perspective—sometimes a fresh view is all you need.",
+        "Combine urban grit with wild landscapes. Michigan teaches us that disruptive ideas need diverse environments to thrive."
+      ],
+      "linkedin": "Michigan is often overlooked as a tech and innovation destination — and that’s a missed opportunity.\n\nI’ve visited some of the top spots that capture why this state deserves more attention.\n\nTraverse City is more than a tourist spot; it’s a hotspot for creatives and entrepreneurs. The community vibe and local businesses make it a place where ideas can flourish.\n\nDetroit’s narrative of reinvention is a textbook case of resilience. The city blends its industrial roots with modern innovation hubs, creating an ecosystem that’s ripe for tech and design breakthroughs.\n\nThen, there’s Sleeping Bear Dunes. It reminds me how important it is to step outside the daily grind. Nature’s challenge here is a lesson in perspective shifts—key for any founder or builder.\n\nIf you’re looking for inspiration or a place to recharge your creative batteries, Michigan’s mix of urban grit and scenic wildness is hard to beat.\n\nWhat underrated places have sparked fresh ideas for you? Let’s discuss how environment shapes innovation."
+    },
+    "evidence": [
+      {
+        "id": "48f34b3a-ecc7-44ae-8724-ea3e2b5e2d1a",
+        "claim": "Top 3 places to visit in Michigan: suggested source",
+        "sourceLabel": "Official tourism guide",
+        "sourceRef": "https://www.google.com/search?q=site%3A.gov+OR+site%3A.org+Michigan%20attractions+tourism",
+        "excerpt": "Official tourism sources help ground visitor-facing claims and attraction summaries.",
+        "sourceType": "web",
+        "verified": false,
+        "confidence": 0.58
+      },
+      {
+        "id": "d8db5fd5-0166-49c3-8d7d-7649e41e12fc",
+        "claim": "Top 3 places to visit in Michigan: suggested source",
+        "sourceLabel": "Google Maps",
+        "sourceRef": "https://www.google.com/maps/search/?api=1&query=Michigan%20attractions",
+        "excerpt": "Use map listings to confirm locations, categories, hours, and existence.",
+        "sourceType": "web",
+        "verified": false,
+        "confidence": 0.58
+      }
+    ],
+    "sources": [
+      {
+        "id": "765f9b61-19fc-4bd7-bebf-9d05bac03d0b",
+        "name": "Official tourism guide",
+        "url": "https://www.google.com/search?q=site%3A.gov+OR+site%3A.org+Michigan%20attractions+tourism",
+        "searchQuery": "Michigan attractions",
+        "sourceType": "web",
+        "sourceCategory": "official-tourism",
+        "domain": "travel",
+        "authorityScore": 9,
+        "relevanceScore": 8,
+        "specificityScore": 9,
+        "freshnessScore": 7,
+        "formatFitScore": 9,
+        "finalScore": 8.5,
+        "whySelected": "Useful for validating destination summaries and official visitor recommendations.",
+        "supports": [
+          "destination overview",
+          "official recommendations"
+        ],
+        "excerpt": "Official tourism sources help ground visitor-facing claims and attraction summaries."
+      },
+      {
+        "id": "987119b7-3811-4455-a80c-da593d4a8775",
+        "name": "Google Maps",
+        "url": "https://www.google.com/maps/search/?api=1&query=Michigan%20attractions",
+        "searchQuery": "Michigan attractions",
+        "sourceType": "web",
+        "sourceCategory": "maps",
+        "domain": "travel",
+        "authorityScore": 8,
+        "relevanceScore": 8,
+        "specificityScore": 9,
+        "freshnessScore": 9,
+        "formatFitScore": 9,
+        "finalScore": 8.35,
+        "whySelected": "Maps validate whether places are real, active, and correctly located.",
+        "supports": [
+          "location",
+          "listing validation"
+        ],
+        "excerpt": "Use map listings to confirm locations, categories, hours, and existence."
+      },
+      {
+        "id": "65f85ac9-8a74-4420-ab7a-9fea7a53d7db",
+        "name": "Tripadvisor",
+        "url": "https://www.tripadvisor.com/Search?q=Michigan%20attractions",
+        "searchQuery": "Michigan attractions",
+        "sourceType": "web",
+        "sourceCategory": "reviews",
+        "domain": "travel",
+        "authorityScore": 7,
+        "relevanceScore": 8,
+        "specificityScore": 9,
+        "freshnessScore": 8,
+        "formatFitScore": 9,
+        "finalScore": 7.9,
+        "whySelected": "Traveler reviews help validate popularity, reputation, and common recommendations.",
+        "supports": [
+          "traveler reviews",
+          "popularity"
+        ],
+        "excerpt": "Use traveler reviews and rankings to validate attraction popularity and user sentiment."
+      },
+      {
+        "id": "52f0ff4a-dcf5-4d39-8b88-d23404238408",
+        "name": "U.S. News Travel",
+        "url": "https://www.google.com/search?q=site%3Atravel.usnews.com+Michigan%20attractions",
+        "searchQuery": "Michigan attractions",
+        "sourceType": "web",
+        "sourceCategory": "editorial-guide",
+        "domain": "travel",
+        "authorityScore": 7,
+        "relevanceScore": 8,
+        "specificityScore": 9,
+        "freshnessScore": 7,
+        "formatFitScore": 8,
+        "finalScore": 7.7,
+        "whySelected": "Editorial travel guides help validate mainstream attraction and itinerary recommendations.",
+        "supports": [
+          "editorial recommendations"
+        ],
+        "excerpt": "Use editorial travel guides to cross-check mainstream attraction and city-guide claims."
+      }
+    ],
+    "warnings": [],
+    "agentVersion": "v1.0.0",
+    "createdAt": "2026-04-28T20:54:15.321Z",
+    "updatedAt": "2026-04-28T20:54:15.321Z"
+  },
+  {
+    "id": "0b0d70ce-594d-4758-8fbc-218991de8876",
+    "format": "social",
+    "status": "review",
+    "topic": "top 3 places to visit in Orlando ",
+    "sourceNotes": "",
+    "outputMarkdown": "# X / Twitter thread\n\n## 1\n\nOrlando isn’t just about theme parks — it’s a whole vibe. Here are the top 3 places you absolutely can’t miss.\n\n## 2\n\n1/ ICON Park: Beyond the giant observation wheel, this spot packs dining, nightlife, and views that are *chef’s kiss*. Perfect for unwinding after a day of hustle.\n\n## 3\n\n2/ Leu Gardens: A hidden gem. Escape the crowd and soak in 50 acres of stunning botanical bliss. Ideal for creatives and nature lovers craving inspiration.\n\n## 4\n\n3/ Winter Park: Think charming streets, boutique shops, and lakefront cafes. It’s where Orlando’s culture feels real and relaxed — a cool contrast to the tourist buzz.\n\n---\n\n# LinkedIn\n\nOrlando often gets boxed in as just a theme park capital. But the city has so much more to offer — especially if you know where to look.\n\nHere are three standout places where builders, creatives, and tech pros can find value beyond the usual:\n\n– ICON Park: A vibrant spot with killer views, great food, and nightlife to decompress and connect.\n\n– Leu Gardens: A peaceful, lush escape that sparks creativity and clarity — perfect to unplug and recharge.\n\n– Winter Park: A charming neighborhood with boutique shops and cafes, offering a genuine slice of local culture.\n\nExploring these places reminds me that inspiration and innovation often come from unexpected corners.\n\nWhere’s your go-to spot to recharge and find fresh ideas? Would love to hear your thoughts.",
+    "outputJson": {
+      "x": "Orlando isn’t just about theme parks — it’s a whole vibe. Here are the top 3 places you absolutely can’t miss.\n\n1/ ICON Park: Beyond the giant observation wheel, this spot packs dining, nightlife, and views that are *chef’s kiss*. Perfect for unwinding after a day of hustle.\n\n2/ Leu Gardens: A hidden gem. Escape the crowd and soak in 50 acres of stunning botanical bliss. Ideal for creatives and nature lovers craving inspiration.\n\n3/ Winter Park: Think charming streets, boutique shops, and lakefront cafes. It’s where Orlando’s culture feels real and relaxed — a cool contrast to the tourist buzz.",
+      "xThread": [
+        "Orlando isn’t just about theme parks — it’s a whole vibe. Here are the top 3 places you absolutely can’t miss.",
+        "1/ ICON Park: Beyond the giant observation wheel, this spot packs dining, nightlife, and views that are *chef’s kiss*. Perfect for unwinding after a day of hustle.",
+        "2/ Leu Gardens: A hidden gem. Escape the crowd and soak in 50 acres of stunning botanical bliss. Ideal for creatives and nature lovers craving inspiration.",
+        "3/ Winter Park: Think charming streets, boutique shops, and lakefront cafes. It’s where Orlando’s culture feels real and relaxed — a cool contrast to the tourist buzz."
+      ],
+      "linkedin": "Orlando often gets boxed in as just a theme park capital. But the city has so much more to offer — especially if you know where to look.\n\nHere are three standout places where builders, creatives, and tech pros can find value beyond the usual:\n\n– ICON Park: A vibrant spot with killer views, great food, and nightlife to decompress and connect.\n\n– Leu Gardens: A peaceful, lush escape that sparks creativity and clarity — perfect to unplug and recharge.\n\n– Winter Park: A charming neighborhood with boutique shops and cafes, offering a genuine slice of local culture.\n\nExploring these places reminds me that inspiration and innovation often come from unexpected corners.\n\nWhere’s your go-to spot to recharge and find fresh ideas? Would love to hear your thoughts."
+    },
+    "evidence": [
+      {
+        "id": "e2be4bc6-a116-45bb-833a-1cb63169e79d",
+        "claim": "top 3 places to visit in Orlando : suggested source",
+        "sourceLabel": "Official tourism guide",
+        "sourceRef": "https://www.google.com/search?q=site%3A.gov+OR+site%3A.org+Orlando%20attractions+tourism",
+        "excerpt": "Official tourism sources help ground visitor-facing claims and attraction summaries.",
+        "sourceType": "web",
+        "verified": false,
+        "confidence": 0.58
+      },
+      {
+        "id": "1a942eeb-5872-4f71-b613-837787c7c411",
+        "claim": "top 3 places to visit in Orlando : suggested source",
+        "sourceLabel": "Google Maps",
+        "sourceRef": "https://www.google.com/maps/search/?api=1&query=Orlando%20attractions",
+        "excerpt": "Use map listings to confirm locations, categories, hours, and existence.",
+        "sourceType": "web",
+        "verified": false,
+        "confidence": 0.58
+      }
+    ],
+    "sources": [
+      {
+        "id": "7ae97584-7ff6-45fa-8320-032a42f9a52c",
+        "name": "Official tourism guide",
+        "url": "https://www.google.com/search?q=site%3A.gov+OR+site%3A.org+Orlando%20attractions+tourism",
+        "searchQuery": "Orlando attractions",
+        "sourceType": "web",
+        "sourceCategory": "official-tourism",
+        "domain": "travel",
+        "authorityScore": 9,
+        "relevanceScore": 8,
+        "specificityScore": 9,
+        "freshnessScore": 7,
+        "formatFitScore": 9,
+        "finalScore": 8.5,
+        "whySelected": "Useful for validating destination summaries and official visitor recommendations.",
+        "supports": [
+          "destination overview",
+          "official recommendations"
+        ],
+        "excerpt": "Official tourism sources help ground visitor-facing claims and attraction summaries."
+      },
+      {
+        "id": "a66b9ad7-ad21-4a56-ba3e-836a6d65c59d",
+        "name": "Google Maps",
+        "url": "https://www.google.com/maps/search/?api=1&query=Orlando%20attractions",
+        "searchQuery": "Orlando attractions",
+        "sourceType": "web",
+        "sourceCategory": "maps",
+        "domain": "travel",
+        "authorityScore": 8,
+        "relevanceScore": 8,
+        "specificityScore": 9,
+        "freshnessScore": 9,
+        "formatFitScore": 9,
+        "finalScore": 8.35,
+        "whySelected": "Maps validate whether places are real, active, and correctly located.",
+        "supports": [
+          "location",
+          "listing validation"
+        ],
+        "excerpt": "Use map listings to confirm locations, categories, hours, and existence."
+      }
+    ],
+    "warnings": [],
+    "agentVersion": "v1.0.0",
+    "createdAt": "2026-04-28T20:49:03.822Z",
+    "updatedAt": "2026-04-28T20:50:24.697Z"
+  },
+  {
+    "id": "be69529d-a9c4-4edc-b586-ca1bb0532002",
+    "format": "social",
+    "status": "review",
+    "topic": "how to build model context protocol (MCP)",
+    "sourceNotes": "",
+    "outputMarkdown": "# X / Twitter thread\n\n## 1\n\nBuilding a Model Context Protocol (MCP) is about more than just data—it's about capturing *meaning.*\n\n## 2\n\nAt its core, MCP defines how models understand the environment—what to pay attention to and what to ignore.\n\n## 3\n\nStart with a clear context boundary. What information shapes your model’s decisions? Define it tightly.\n\n## 4\n\nNext, design layers of context: immediate input, short-term memory, and long-term knowledge.\n\n## 5\n\nThink about protocol rules. How does your model request missing info? How does it update context dynamically?\n\n## 6\n\nA strong MCP lets models handle ambiguity, carry state across sessions, and maintain relevance over time.\n\n## 7\n\nDon’t just build protocols for data exchange—build for *understanding.*\n\n## 8\n\nIn short: MCP is the nervous system for smarter, more adaptable AI models.\n\n---\n\n# LinkedIn\n\nHow do you build a Model Context Protocol (MCP) that truly empowers AI models?\n\nIt’s not just about feeding data. It’s about structuring what matters—defining and managing the context that guides model behavior.\n\nHere’s what works in my experience:\n\n- Set clear context boundaries: What data shapes your model’s output?\n- Layer your context: immediate inputs, recent interactions, and core knowledge.\n- Craft protocol rules for fetching and updating context dynamically.\n- Plan for ambiguity and evolving information over multiple sessions.\n\nThis approach makes models smarter, more adaptable, and relevant.\n\nIf you’re building next-gen AI, think beyond data pipelines—think context as a protocol.\n\nWhat’s your approach to managing model context? Curious to learn from your insights.",
+    "outputJson": {
+      "x": "Building a Model Context Protocol (MCP) is about more than just data—it's about capturing *meaning.*\n\nAt its core, MCP defines how models understand the environment—what to pay attention to and what to ignore.\n\nStart with a clear context boundary. What information shapes your model’s decisions? Define it tightly.\n\nNext, design layers of context: immediate input, short-term memory, and long-term knowledge.\n\nThink about protocol rules. How does your model request missing info? How does it update context dynamically?\n\nA strong MCP lets models handle ambiguity, carry state across sessions, and maintain relevance over time.\n\nDon’t just build protocols for data exchange—build for *understanding.*\n\nIn short: MCP is the nervous system for smarter, more adaptable AI models.",
+      "xThread": [
+        "Building a Model Context Protocol (MCP) is about more than just data—it's about capturing *meaning.*",
+        "At its core, MCP defines how models understand the environment—what to pay attention to and what to ignore.",
+        "Start with a clear context boundary. What information shapes your model’s decisions? Define it tightly.",
+        "Next, design layers of context: immediate input, short-term memory, and long-term knowledge.",
+        "Think about protocol rules. How does your model request missing info? How does it update context dynamically?",
+        "A strong MCP lets models handle ambiguity, carry state across sessions, and maintain relevance over time.",
+        "Don’t just build protocols for data exchange—build for *understanding.*",
+        "In short: MCP is the nervous system for smarter, more adaptable AI models."
+      ],
+      "linkedin": "How do you build a Model Context Protocol (MCP) that truly empowers AI models?\n\nIt’s not just about feeding data. It’s about structuring what matters—defining and managing the context that guides model behavior.\n\nHere’s what works in my experience:\n\n- Set clear context boundaries: What data shapes your model’s output?\n- Layer your context: immediate inputs, recent interactions, and core knowledge.\n- Craft protocol rules for fetching and updating context dynamically.\n- Plan for ambiguity and evolving information over multiple sessions.\n\nThis approach makes models smarter, more adaptable, and relevant.\n\nIf you’re building next-gen AI, think beyond data pipelines—think context as a protocol.\n\nWhat’s your approach to managing model context? Curious to learn from your insights."
+    },
+    "evidence": [
+      {
+        "id": "35d50300-21be-4c48-9412-caaeb7faeb76",
+        "claim": "how to build model context protocol (MCP): suggested source",
+        "sourceLabel": "Wikipedia – how to build model context protocol (MCP)",
+        "sourceRef": "https://en.wikipedia.org/w/index.php?search=how%20to%20build%20model%20context%20protocol%20(MCP)",
+        "excerpt": "Use a broad encyclopedia overview to orient around the core topic quickly.",
+        "sourceType": "web",
+        "verified": false,
+        "confidence": 0.58
+      },
+      {
+        "id": "c1f112e7-9367-4a33-8f27-4924dc64c89c",
+        "claim": "how to build model context protocol (MCP): suggested source",
+        "sourceLabel": "Google search – how to build model context protocol (MCP)",
+        "sourceRef": "https://www.google.com/search?q=how%20to%20build%20model%20context%20protocol%20(MCP)",
+        "excerpt": "Use a general search to find credible secondary references when the topic is broad or mixed.",
+        "sourceType": "web",
+        "verified": false,
+        "confidence": 0.58
+      }
+    ],
+    "warnings": [],
+    "agentVersion": "v1.0.0",
+    "createdAt": "2026-04-28T20:21:57.954Z",
+    "updatedAt": "2026-04-28T20:21:57.954Z"
+  },
+  {
+    "id": "2029a1af-485b-49b7-a0d7-ed14562e3983",
+    "format": "social",
+    "status": "review",
+    "topic": "How to create an MCP ",
+    "sourceNotes": "",
+    "outputMarkdown": "# X / Twitter thread\n\n## 1\n\nEver heard of an MCP? No, not the villain from Tron. It’s a Minimum Commitment Product—a smarter way to launch.\n\n## 2\n\nMost founders obsess over Minimum Viable Products. But MVPs often mean half-baked features and vague feedback.\n\n## 3\n\nMCP forces you to commit early, deeply, and clearly to a solution. It’s about building what you *can* do, not just what you *might* do.\n\n## 4\n\nStart by defining your core promise. What problem are you solving? Then, strip everything but the absolute essentials to deliver that promise fully.\n\n## 5\n\nNext, embed real accountability. Make commitments visible and measurable for your team and customers. No vague goals allowed.\n\n## 6\n\nAn MCP is testable AND undeniable. It’s not a prototype; it’s a complete muscle you flex to prove value before scaling.\n\n## 7\n\nMost important: MCPs build trust faster with customers and teams—because you’re delivering on promised value upfront.\n\n## 8\n\nSkip the noise. Commit tight, build sharp, and watch momentum explode.\n\n---\n\n# LinkedIn\n\nHow do you build a product that customers trust from day one?\n\nForget the usual MVP chatter. I’m talking about the Minimum Commitment Product (MCP).\n\nUnlike MVPs, which often stall with half-baked features, MCPs demand real commitment—to your solution, your team, and your customers.\n\nHere’s how to create an MCP:\n\n- Define your core promise clearly.\n- Strip away everything but the essentials needed to deliver on that promise fully.\n- Make commitments visible and measurable.\n- Build a product that is testable—and undeniably valuable.\n\nThe result? Faster trust-building and stronger momentum in early stages.\n\nIt’s a shift in mindset: from ‘maybe this will work’ to ‘this guarantees value.’\n\nWhat’s one commitment you could make today to sharpen your product focus? I'd love to hear your take.",
+    "outputJson": {
+      "x": "Ever heard of an MCP? No, not the villain from Tron. It’s a Minimum Commitment Product—a smarter way to launch.\n\nMost founders obsess over Minimum Viable Products. But MVPs often mean half-baked features and vague feedback.\n\nMCP forces you to commit early, deeply, and clearly to a solution. It’s about building what you *can* do, not just what you *might* do.\n\nStart by defining your core promise. What problem are you solving? Then, strip everything but the absolute essentials to deliver that promise fully.\n\nNext, embed real accountability. Make commitments visible and measurable for your team and customers. No vague goals allowed.\n\nAn MCP is testable AND undeniable. It’s not a prototype; it’s a complete muscle you flex to prove value before scaling.\n\nMost important: MCPs build trust faster with customers and teams—because you’re delivering on promised value upfront.\n\nSkip the noise. Commit tight, build sharp, and watch momentum explode.",
+      "xThread": [
+        "Ever heard of an MCP? No, not the villain from Tron. It’s a Minimum Commitment Product—a smarter way to launch.",
+        "Most founders obsess over Minimum Viable Products. But MVPs often mean half-baked features and vague feedback.",
+        "MCP forces you to commit early, deeply, and clearly to a solution. It’s about building what you *can* do, not just what you *might* do.",
+        "Start by defining your core promise. What problem are you solving? Then, strip everything but the absolute essentials to deliver that promise fully.",
+        "Next, embed real accountability. Make commitments visible and measurable for your team and customers. No vague goals allowed.",
+        "An MCP is testable AND undeniable. It’s not a prototype; it’s a complete muscle you flex to prove value before scaling.",
+        "Most important: MCPs build trust faster with customers and teams—because you’re delivering on promised value upfront.",
+        "Skip the noise. Commit tight, build sharp, and watch momentum explode."
+      ],
+      "linkedin": "How do you build a product that customers trust from day one?\n\nForget the usual MVP chatter. I’m talking about the Minimum Commitment Product (MCP).\n\nUnlike MVPs, which often stall with half-baked features, MCPs demand real commitment—to your solution, your team, and your customers.\n\nHere’s how to create an MCP:\n\n- Define your core promise clearly.\n- Strip away everything but the essentials needed to deliver on that promise fully.\n- Make commitments visible and measurable.\n- Build a product that is testable—and undeniably valuable.\n\nThe result? Faster trust-building and stronger momentum in early stages.\n\nIt’s a shift in mindset: from ‘maybe this will work’ to ‘this guarantees value.’\n\nWhat’s one commitment you could make today to sharpen your product focus? I'd love to hear your take."
+    },
+    "evidence": [
+      {
+        "id": "b8793894-616f-4f2e-b5de-0d6535f3f61e",
+        "claim": "How to create an MCP : suggested source",
+        "sourceLabel": "Wikipedia – How to create an MCP ",
+        "sourceRef": "https://en.wikipedia.org/w/index.php?search=How%20to%20create%20an%20MCP%20",
+        "excerpt": "Use a broad encyclopedia overview to orient around the core topic quickly.",
+        "sourceType": "web",
+        "verified": false,
+        "confidence": 0.58
+      },
+      {
+        "id": "bfd0250c-871e-4d47-82dd-93707cc40892",
+        "claim": "How to create an MCP : suggested source",
+        "sourceLabel": "Google search – How to create an MCP ",
+        "sourceRef": "https://www.google.com/search?q=How%20to%20create%20an%20MCP%20",
+        "excerpt": "Use a general search to find credible secondary references when the topic is broad or mixed.",
+        "sourceType": "web",
+        "verified": false,
+        "confidence": 0.58
+      }
+    ],
+    "warnings": [],
+    "agentVersion": "v1.0.0",
+    "createdAt": "2026-04-28T20:19:52.606Z",
+    "updatedAt": "2026-04-28T20:19:52.606Z"
+  },
+  {
+    "id": "dd42086e-c76a-4b39-8c33-3370853f7ab3",
+    "format": "social",
+    "status": "review",
+    "topic": "How to start my coding journey",
+    "sourceNotes": "",
+    "outputMarkdown": "# X / Twitter thread\n\n## 1\n\nThinking about starting coding but don’t know where to begin? You’re not alone.\n\n## 2\n\nStep 1: Pick a language that excites you. Python is great for beginners and versatile.\n\n## 3\n\nStep 2: Build small projects. Nothing beats learning by doing — even if it’s simple stuff like a calculator.\n\n## 4\n\nStep 3: Use free resources. Websites like freeCodeCamp, Codecademy, and YouTube tutorials have you covered.\n\n## 5\n\nStep 4: Join communities. Reddit, Discord servers, and Twitter can connect you with other learners and mentors.\n\n## 6\n\nStep 5: Don’t stress perfection. Bugs and errors are just part of the process. Keep experimenting.\n\n## 7\n\nBonus tip: Track your progress. It helps you see how far you’ve come and keeps you motivated.\n\n## 8\n\nCoding isn’t magic, it’s practice and patience. Start small, stay curious, and keep building.\n\n---\n\n# LinkedIn\n\nStarting to code can feel overwhelming, but it doesn’t have to be.\n\nThe key is to break it down into manageable steps.\n\nFirst, choose a language that fits your interests. Python is beginner-friendly and widely used.\n\nThen, focus on building simple projects. This is how you turn theory into skills.\n\nThere are tons of free resources online:\n- freeCodeCamp\n- Codecademy\n- YouTube tutorials\n\nDon’t forget the value of community. Join forums and Discord groups where you can ask questions and share wins.\n\nRemember: mistakes aren’t failures, just part of learning.\n\nTrack your progress and celebrate small victories.\n\nWhat’s the first project you want to build? Share your goals below!",
+    "outputJson": {
+      "x": "Thinking about starting coding but don’t know where to begin? You’re not alone.\n\nStep 1: Pick a language that excites you. Python is great for beginners and versatile.\n\nStep 2: Build small projects. Nothing beats learning by doing — even if it’s simple stuff like a calculator.\n\nStep 3: Use free resources. Websites like freeCodeCamp, Codecademy, and YouTube tutorials have you covered.\n\nStep 4: Join communities. Reddit, Discord servers, and Twitter can connect you with other learners and mentors.\n\nStep 5: Don’t stress perfection. Bugs and errors are just part of the process. Keep experimenting.\n\nBonus tip: Track your progress. It helps you see how far you’ve come and keeps you motivated.\n\nCoding isn’t magic, it’s practice and patience. Start small, stay curious, and keep building.",
+      "xThread": [
+        "Thinking about starting coding but don’t know where to begin? You’re not alone.",
+        "Step 1: Pick a language that excites you. Python is great for beginners and versatile.",
+        "Step 2: Build small projects. Nothing beats learning by doing — even if it’s simple stuff like a calculator.",
+        "Step 3: Use free resources. Websites like freeCodeCamp, Codecademy, and YouTube tutorials have you covered.",
+        "Step 4: Join communities. Reddit, Discord servers, and Twitter can connect you with other learners and mentors.",
+        "Step 5: Don’t stress perfection. Bugs and errors are just part of the process. Keep experimenting.",
+        "Bonus tip: Track your progress. It helps you see how far you’ve come and keeps you motivated.",
+        "Coding isn’t magic, it’s practice and patience. Start small, stay curious, and keep building."
+      ],
+      "linkedin": "Starting to code can feel overwhelming, but it doesn’t have to be.\n\nThe key is to break it down into manageable steps.\n\nFirst, choose a language that fits your interests. Python is beginner-friendly and widely used.\n\nThen, focus on building simple projects. This is how you turn theory into skills.\n\nThere are tons of free resources online:\n- freeCodeCamp\n- Codecademy\n- YouTube tutorials\n\nDon’t forget the value of community. Join forums and Discord groups where you can ask questions and share wins.\n\nRemember: mistakes aren’t failures, just part of learning.\n\nTrack your progress and celebrate small victories.\n\nWhat’s the first project you want to build? Share your goals below!"
+    },
+    "evidence": [],
+    "warnings": [],
+    "agentVersion": "v1.0.0",
+    "createdAt": "2026-04-28T20:12:43.355Z",
+    "updatedAt": "2026-04-28T20:12:43.355Z"
+  },
+  {
+    "id": "54843328-9a5c-4781-9600-266fd912bec7",
+    "format": "social",
+    "status": "review",
+    "topic": "Top 3 places to visit in Utah",
+    "sourceNotes": "",
+    "outputMarkdown": "# X / Twitter thread\n\n## 1\n\nUtah's not just a state, it's an adventure playground. 🎒 Ready for the best road trip stops?\n\n## 2\n\n1/ Arches National Park: Over 2,000 natural stone arches plus surreal landscapes. Don’t miss Delicate Arch at sunset. It’s a view you won’t forget.\n\n## 3\n\n2/ Bryce Canyon National Park: Hoodoos everywhere. These spindly rock formations make you feel like you landed on another planet.\n\n## 4\n\n3/ Zion National Park: Massive red cliffs and epic hikes like Angel’s Landing. Pro tip: Start early to beat the crowds and heat.\n\n---\n\n# LinkedIn\n\nPlanning a road trip through Utah? Here are the top 3 can’t-miss destinations that should be on your itinerary.\n\nUtah's landscapes are unique and breathtaking—ideal for anyone who loves nature and adventure.\n\n- Arches National Park: Famous for over 2,000 natural stone arches. Delicate Arch at sunset is an unforgettable experience.\n\n- Bryce Canyon National Park: Known for its distinctive hoodoo formations that create a surreal landscape unlike anywhere else on earth.\n\n- Zion National Park: Offers dramatic red cliffs and world-class hikes including Angel’s Landing. Early starts are key to a better experience.\n\nEach spot delivers distinct scenery and challenges, perfect for fueling your wanderlust and capturing incredible photos.\n\nIf you’ve been to any of these, what was your favorite moment? If not, which one’s topping your list?",
+    "outputJson": {
+      "x": "Utah's not just a state, it's an adventure playground. 🎒 Ready for the best road trip stops?\n\n1/ Arches National Park: Over 2,000 natural stone arches plus surreal landscapes. Don’t miss Delicate Arch at sunset. It’s a view you won’t forget.\n\n2/ Bryce Canyon National Park: Hoodoos everywhere. These spindly rock formations make you feel like you landed on another planet.\n\n3/ Zion National Park: Massive red cliffs and epic hikes like Angel’s Landing. Pro tip: Start early to beat the crowds and heat.",
+      "xThread": [
+        "Utah's not just a state, it's an adventure playground. 🎒 Ready for the best road trip stops?",
+        "1/ Arches National Park: Over 2,000 natural stone arches plus surreal landscapes. Don’t miss Delicate Arch at sunset. It’s a view you won’t forget.",
+        "2/ Bryce Canyon National Park: Hoodoos everywhere. These spindly rock formations make you feel like you landed on another planet.",
+        "3/ Zion National Park: Massive red cliffs and epic hikes like Angel’s Landing. Pro tip: Start early to beat the crowds and heat."
+      ],
+      "linkedin": "Planning a road trip through Utah? Here are the top 3 can’t-miss destinations that should be on your itinerary.\n\nUtah's landscapes are unique and breathtaking—ideal for anyone who loves nature and adventure.\n\n- Arches National Park: Famous for over 2,000 natural stone arches. Delicate Arch at sunset is an unforgettable experience.\n\n- Bryce Canyon National Park: Known for its distinctive hoodoo formations that create a surreal landscape unlike anywhere else on earth.\n\n- Zion National Park: Offers dramatic red cliffs and world-class hikes including Angel’s Landing. Early starts are key to a better experience.\n\nEach spot delivers distinct scenery and challenges, perfect for fueling your wanderlust and capturing incredible photos.\n\nIf you’ve been to any of these, what was your favorite moment? If not, which one’s topping your list?"
+    },
+    "evidence": [
+      {
+        "id": "d96a44a1-483c-4908-8894-821f94a04332",
+        "claim": "Top 3 places to visit in Utah: suggested source",
+        "sourceLabel": "Tripadvisor – Utah attractions",
+        "sourceRef": "https://www.tripadvisor.com/Search?q=Utah%20attractions",
+        "excerpt": "Use traveler reviews and rankings to sanity-check whether the places or attractions in the post are commonly recommended.",
+        "sourceType": "web",
+        "verified": false,
+        "confidence": 0.58
+      },
+      {
+        "id": "1192b9ae-9934-49cd-9fbd-e5b84cee4d57",
+        "claim": "Top 3 places to visit in Utah: suggested source",
+        "sourceLabel": "Google Maps – Utah attractions",
+        "sourceRef": "https://www.google.com/maps/search/?api=1&query=Utah%20attractions",
+        "excerpt": "Use Maps to confirm locations, categories, ratings, and whether the recommended places are real and still active.",
+        "sourceType": "web",
+        "verified": false,
+        "confidence": 0.58
+      }
+    ],
+    "warnings": [],
+    "agentVersion": "v1.0.0",
+    "createdAt": "2026-04-28T20:10:54.164Z",
+    "updatedAt": "2026-04-28T20:10:54.164Z"
+  },
+  {
+    "id": "aaab1a21-91c8-4f71-98ac-f37d2d99b758",
+    "format": "social",
+    "status": "review",
+    "topic": "Top 3 places to visit in L.A california",
+    "sourceNotes": "",
+    "outputMarkdown": "# X / Twitter thread\n\n## 1\n\nLA isn’t just Hollywood and beaches. It’s a vibe packed with hidden gems. Here are the top 3 places you *have* to visit next time you’re in town.\n\n## 2\n\n1/ Griffith Observatory: The perfect blend of science, city views, and starry nights. Bonus? The hike up is a workout with an insanely Instagrammable reward at the top.\n\n## 3\n\n2/ The Getty Center: Art, architecture, and gardens all wrapped into one. It’s a serene escape that surprises even the most jaded traveler.\n\n## 4\n\n3/ Venice Beach Boardwalk: Where the weird meets the wonderful. Street performers, quirky shops, and ocean breeze fuel creativity you didn’t know you needed.\n\n---\n\n# LinkedIn\n\nLA often gets reduced to just Hollywood — but that’s selling it way short.\n\nIf you want to experience the real energy of this city, here are three spots that capture its diversity and soul:\n\n- Griffith Observatory offers more than just a view; it’s a reminder that curiosity drives us.\n\n- The Getty Center is an oasis blending cutting-edge architecture with timeless art, perfect for reflection.\n\n- Venice Beach Boardwalk is a playground for the creative and the unconventional.\n\nEach spot tells a different story about LA’s culture and community.\n\nNext time you’re planning a trip, think beyond the usual and explore these corners.\n\nWhat’s your favorite hidden gem in LA? Share your insights or discoveries below.",
+    "outputJson": {
+      "x": "LA isn’t just Hollywood and beaches. It’s a vibe packed with hidden gems. Here are the top 3 places you *have* to visit next time you’re in town.\n\n1/ Griffith Observatory: The perfect blend of science, city views, and starry nights. Bonus? The hike up is a workout with an insanely Instagrammable reward at the top.\n\n2/ The Getty Center: Art, architecture, and gardens all wrapped into one. It’s a serene escape that surprises even the most jaded traveler.\n\n3/ Venice Beach Boardwalk: Where the weird meets the wonderful. Street performers, quirky shops, and ocean breeze fuel creativity you didn’t know you needed.",
+      "xThread": [
+        "LA isn’t just Hollywood and beaches. It’s a vibe packed with hidden gems. Here are the top 3 places you *have* to visit next time you’re in town.",
+        "1/ Griffith Observatory: The perfect blend of science, city views, and starry nights. Bonus? The hike up is a workout with an insanely Instagrammable reward at the top.",
+        "2/ The Getty Center: Art, architecture, and gardens all wrapped into one. It’s a serene escape that surprises even the most jaded traveler.",
+        "3/ Venice Beach Boardwalk: Where the weird meets the wonderful. Street performers, quirky shops, and ocean breeze fuel creativity you didn’t know you needed."
+      ],
+      "linkedin": "LA often gets reduced to just Hollywood — but that’s selling it way short.\n\nIf you want to experience the real energy of this city, here are three spots that capture its diversity and soul:\n\n- Griffith Observatory offers more than just a view; it’s a reminder that curiosity drives us.\n\n- The Getty Center is an oasis blending cutting-edge architecture with timeless art, perfect for reflection.\n\n- Venice Beach Boardwalk is a playground for the creative and the unconventional.\n\nEach spot tells a different story about LA’s culture and community.\n\nNext time you’re planning a trip, think beyond the usual and explore these corners.\n\nWhat’s your favorite hidden gem in LA? Share your insights or discoveries below."
+    },
+    "evidence": [
+      {
+        "id": "94ab6796-f06a-4935-be2f-eec81b600789",
+        "claim": "Top 3 places to visit in L.A california: suggested source",
+        "sourceLabel": "Tripadvisor results for Top 3 places to visit in L.A california attractions",
+        "sourceRef": "https://www.tripadvisor.com/Search?q=Top%203%20places%20to%20visit%20in%20L.A%20california%20attractions",
+        "excerpt": "Use traveler reviews and rankings to sanity-check whether the places or attractions in the post are commonly recommended.",
+        "sourceType": "web",
+        "verified": false,
+        "confidence": 0.58
+      },
+      {
+        "id": "77993e25-b11c-4405-b3eb-36097e3c4a12",
+        "claim": "Top 3 places to visit in L.A california: suggested source",
+        "sourceLabel": "Google Maps results for Top 3 places to visit in L.A california attractions",
+        "sourceRef": "https://www.google.com/maps/search/?api=1&query=Top%203%20places%20to%20visit%20in%20L.A%20california%20attractions",
+        "excerpt": "Use Maps to confirm locations, categories, ratings, and whether the recommended places are real and still active.",
+        "sourceType": "web",
+        "verified": false,
+        "confidence": 0.58
+      }
+    ],
+    "warnings": [],
+    "agentVersion": "v1.0.0",
+    "createdAt": "2026-04-28T19:58:27.220Z",
+    "updatedAt": "2026-04-28T20:01:03.260Z"
+  },
+  {
+    "id": "2fff828b-d94b-4ea2-8d89-b4a3f7c482f5",
+    "format": "social",
+    "status": "review",
+    "topic": "Top 3 things to do in New York City",
+    "sourceNotes": "",
+    "outputMarkdown": "# X / Twitter thread\n\n## 1\n\nNew York City isn’t just a place. It’s a feeling. Here are the top 3 ways to truly experience it.\n\n## 2\n\n1/ Walk the High Line. It’s the city’s best kept secret for views, art, and people-watching—all above the chaos below.\n\n## 3\n\n2/ Visit an indie bookstore in the Village. It’s where creativity breathes, and you can spot the ideas shaping tomorrow.\n\n## 4\n\n3/ Grab a slice from a local joint—not the tourist traps. Real New Yorkers judge pizza by the corner slices.\n\n---\n\n# LinkedIn\n\nNew York City offers more than the usual landmarks.\n\nTo truly capture its heartbeat, focus on experiences that reveal its layers.\n\n- Walk the High Line for unmatched views and street art.\n- Explore an indie bookstore in Greenwich Village—where innovation quietly thrives.\n- Eat pizza like a New Yorker. Skip the chains, seek out authentic corner slices.\n\nThese three give you a lens into the city’s energy, creativity, and grit.\n\nWhat’s your go-to NYC experience that’s off the obvious list?\n\nLet’s share the spots that fuel our best ideas.",
+    "outputJson": {
+      "x": "New York City isn’t just a place. It’s a feeling. Here are the top 3 ways to truly experience it.\n\n1/ Walk the High Line. It’s the city’s best kept secret for views, art, and people-watching—all above the chaos below.\n\n2/ Visit an indie bookstore in the Village. It’s where creativity breathes, and you can spot the ideas shaping tomorrow.\n\n3/ Grab a slice from a local joint—not the tourist traps. Real New Yorkers judge pizza by the corner slices.",
+      "xThread": [
+        "New York City isn’t just a place. It’s a feeling. Here are the top 3 ways to truly experience it.",
+        "1/ Walk the High Line. It’s the city’s best kept secret for views, art, and people-watching—all above the chaos below.",
+        "2/ Visit an indie bookstore in the Village. It’s where creativity breathes, and you can spot the ideas shaping tomorrow.",
+        "3/ Grab a slice from a local joint—not the tourist traps. Real New Yorkers judge pizza by the corner slices."
+      ],
+      "linkedin": "New York City offers more than the usual landmarks.\n\nTo truly capture its heartbeat, focus on experiences that reveal its layers.\n\n- Walk the High Line for unmatched views and street art.\n- Explore an indie bookstore in Greenwich Village—where innovation quietly thrives.\n- Eat pizza like a New Yorker. Skip the chains, seek out authentic corner slices.\n\nThese three give you a lens into the city’s energy, creativity, and grit.\n\nWhat’s your go-to NYC experience that’s off the obvious list?\n\nLet’s share the spots that fuel our best ideas."
+    },
+    "evidence": [
+      {
+        "id": "20fa73bd-27ec-4e16-bfdc-2c07eb81e6d7",
+        "claim": "Top 3 things to do in New York City: suggested source",
+        "sourceLabel": "Tripadvisor results for Top",
+        "sourceRef": "https://www.tripadvisor.com/Search?q=Top",
+        "excerpt": "Use traveler reviews and rankings to sanity-check whether the places or attractions in the post are commonly recommended.",
+        "sourceType": "web",
+        "verified": false,
+        "confidence": 0.58
+      },
+      {
+        "id": "27db5806-72af-461c-884c-f4dc10614f82",
+        "claim": "Top 3 things to do in New York City: suggested source",
+        "sourceLabel": "Google Maps results for Top",
+        "sourceRef": "https://www.google.com/maps/search/?api=1&query=Top",
+        "excerpt": "Use Maps to confirm locations, categories, ratings, and whether the recommended places are real and still active.",
+        "sourceType": "web",
+        "verified": false,
+        "confidence": 0.58
+      }
+    ],
+    "warnings": [],
+    "agentVersion": "v1.0.0",
+    "createdAt": "2026-04-28T19:51:26.913Z",
+    "updatedAt": "2026-04-28T19:51:26.913Z"
+  },
+  {
+    "id": "b6a7785a-a2f5-4cb9-bc5a-08c00da3b66e",
+    "format": "social",
+    "status": "review",
+    "topic": "Top 3 things to do in Miami",
+    "sourceNotes": "",
+    "outputMarkdown": "# X / Twitter thread\n\n## 1\n\nMiami isn’t just beaches and bright lights—it’s a playground for the curious and the bold.\n\n## 2\n\n1/3: Explore Wynwood Walls. Not just graffiti. It’s a jaw-dropping open-air museum where street art bursts with color and attitude.\n\n## 3\n\n2/3: Hit South Beach early morning. Beyond the party zone, it’s zen, surf, and some of the best people-watching you’ll find.\n\n## 4\n\n3/3: Grab a cafecito in Little Havana. This isn’t your usual coffee run—it’s a sip of culture, history, and a little Cuban soul.\n\n## 5\n\nBonus tip: Skip the tourist traps. Miami’s magic is in the details—local dives, impromptu salsa nights, and that perfect sunset view.\n\n---\n\n# LinkedIn\n\nMiami is often seen as a city of beaches and nightlife, but there’s so much more beneath the surface.\n\nIf you’re heading there, don’t just follow the usual checklist. Instead, dive into experiences that give you a real taste of the city’s creative pulse and rich culture.\n\nHere are three standout things to put on your radar:\n\n- Wynwood Walls: A dynamic outdoor gallery that transforms street art into a vibrant storytelling medium.\n\n- South Beach at dawn: A peaceful, almost meditative scene before the crowds roll in.\n\n- Little Havana: More than coffee—this neighborhood serves up history, community, and Cuban warmth in every corner.\n\nThese spots aren’t just sights; they’re experiences that capture Miami’s authentic vibe.\n\nWhat hidden gems have you discovered in your city that go beyond the obvious? Let’s swap stories.",
+    "outputJson": {
+      "x": "Miami isn’t just beaches and bright lights—it’s a playground for the curious and the bold.\n\n1/3: Explore Wynwood Walls. Not just graffiti. It’s a jaw-dropping open-air museum where street art bursts with color and attitude.\n\n2/3: Hit South Beach early morning. Beyond the party zone, it’s zen, surf, and some of the best people-watching you’ll find.\n\n3/3: Grab a cafecito in Little Havana. This isn’t your usual coffee run—it’s a sip of culture, history, and a little Cuban soul.\n\nBonus tip: Skip the tourist traps. Miami’s magic is in the details—local dives, impromptu salsa nights, and that perfect sunset view.",
+      "xThread": [
+        "Miami isn’t just beaches and bright lights—it’s a playground for the curious and the bold.",
+        "1/3: Explore Wynwood Walls. Not just graffiti. It’s a jaw-dropping open-air museum where street art bursts with color and attitude.",
+        "2/3: Hit South Beach early morning. Beyond the party zone, it’s zen, surf, and some of the best people-watching you’ll find.",
+        "3/3: Grab a cafecito in Little Havana. This isn’t your usual coffee run—it’s a sip of culture, history, and a little Cuban soul.",
+        "Bonus tip: Skip the tourist traps. Miami’s magic is in the details—local dives, impromptu salsa nights, and that perfect sunset view."
+      ],
+      "linkedin": "Miami is often seen as a city of beaches and nightlife, but there’s so much more beneath the surface.\n\nIf you’re heading there, don’t just follow the usual checklist. Instead, dive into experiences that give you a real taste of the city’s creative pulse and rich culture.\n\nHere are three standout things to put on your radar:\n\n- Wynwood Walls: A dynamic outdoor gallery that transforms street art into a vibrant storytelling medium.\n\n- South Beach at dawn: A peaceful, almost meditative scene before the crowds roll in.\n\n- Little Havana: More than coffee—this neighborhood serves up history, community, and Cuban warmth in every corner.\n\nThese spots aren’t just sights; they’re experiences that capture Miami’s authentic vibe.\n\nWhat hidden gems have you discovered in your city that go beyond the obvious? Let’s swap stories."
+    },
+    "evidence": [],
+    "warnings": [],
+    "agentVersion": "v1.0.0",
+    "createdAt": "2026-04-28T18:50:52.148Z",
+    "updatedAt": "2026-04-28T18:50:52.148Z"
+  },
+  {
+    "id": "11461b50-ab6b-4c29-9a23-652048e5e7cd",
+    "format": "social",
+    "status": "review",
+    "topic": "top 5 places to visit in San Francisco",
+    "sourceNotes": "",
+    "outputMarkdown": "# X / Twitter thread\n\n## 1\n\nSan Francisco isn’t just fog and cable cars. It’s a playground for the curious and the bold.\n\n## 2\n\n1️⃣ Golden Gate Bridge — more than just a photo op. Walk it, bike it, feel the scale of innovation and ambition.\n\n## 3\n\n2️⃣ Alcatraz Island — history meets mystery. Dive deep into a prison that’s now one of the most visited landmarks.\n\n## 4\n\n3️⃣ Mission District — tech tongues meet street art. Great food, vibrant murals, and a pulse that’s hard to find anywhere else.\n\n## 5\n\n4️⃣ Palace of Fine Arts — a slice of calm and architectural beauty. Perfect spot for reflection and inspiration.\n\n## 6\n\n5️⃣ Ferry Building Marketplace — where innovation meets tradition. Fresh food, local makers, and the hustle of a city on the move.\n\n---\n\n# LinkedIn\n\nSan Francisco is often stereotyped by its fog and tourist clichés. But beneath that lies a city full of inspiration and innovation.\n\nIf you want to experience the soul of the city, start with the Golden Gate Bridge — a symbol of ambition stretching across the bay.\n\nDive into history at Alcatraz Island, where stories of resilience and change still echo.\n\nThe Mission District offers a raw, creative energy — street art and culinary delights reminding us of the power of community-driven transformation.\n\nThen, step into calm at the Palace of Fine Arts, a reminder that even in fast-paced environments, reflection fuels progress.\n\nFinally, the Ferry Building Marketplace stands as a testament to how tradition and innovation can coexist beautifully.\n\nWhat places inspire your creativity and push your perspective? How do you find balance between hustle and reflection in your own work?",
+    "outputJson": {
+      "xThread": [
+        "San Francisco isn’t just fog and cable cars. It’s a playground for the curious and the bold.",
+        "1️⃣ Golden Gate Bridge — more than just a photo op. Walk it, bike it, feel the scale of innovation and ambition.",
+        "2️⃣ Alcatraz Island — history meets mystery. Dive deep into a prison that’s now one of the most visited landmarks.",
+        "3️⃣ Mission District — tech tongues meet street art. Great food, vibrant murals, and a pulse that’s hard to find anywhere else.",
+        "4️⃣ Palace of Fine Arts — a slice of calm and architectural beauty. Perfect spot for reflection and inspiration.",
+        "5️⃣ Ferry Building Marketplace — where innovation meets tradition. Fresh food, local makers, and the hustle of a city on the move."
+      ],
+      "linkedin": "San Francisco is often stereotyped by its fog and tourist clichés. But beneath that lies a city full of inspiration and innovation.\n\nIf you want to experience the soul of the city, start with the Golden Gate Bridge — a symbol of ambition stretching across the bay.\n\nDive into history at Alcatraz Island, where stories of resilience and change still echo.\n\nThe Mission District offers a raw, creative energy — street art and culinary delights reminding us of the power of community-driven transformation.\n\nThen, step into calm at the Palace of Fine Arts, a reminder that even in fast-paced environments, reflection fuels progress.\n\nFinally, the Ferry Building Marketplace stands as a testament to how tradition and innovation can coexist beautifully.\n\nWhat places inspire your creativity and push your perspective? How do you find balance between hustle and reflection in your own work?"
+    },
+    "evidence": [],
+    "warnings": [],
+    "agentVersion": "v1.0.0",
+    "createdAt": "2026-04-28T18:22:31.646Z",
+    "updatedAt": "2026-04-28T18:22:31.646Z"
+  },
+  {
+    "id": "2c2adab1-b3a6-4b64-9cdc-7002547e8f2f",
+    "format": "social",
+    "status": "review",
+    "topic": "Top 3 things to do in San Francisco",
+    "sourceNotes": "",
+    "outputMarkdown": "# X / Twitter thread\n\n## 1\n\nSan Francisco isn’t just another city. It’s a playground for creators and explorers.\n\n## 2\n\n1/ Visit the Golden Gate Bridge. Iconic for a reason. The views reset your perspective—literally and metaphorically.\n\n## 3\n\n2/ Explore the Mission District. Street art and startup vibes merge here. It’s where culture meets disruption.\n\n## 4\n\n3/ Head to Alcatraz Island. More than a prison tour—it's a dive into resilience and reinvention.\n\n---\n\n# LinkedIn\n\nSan Francisco continues to captivate those who build and innovate.\n\nBeyond the tech hubs and venture capital meetings, the city offers lessons in creativity, culture, and resilience.\n\nStart with the Golden Gate Bridge to appreciate the power of iconic vision.\n\nThen, immerse yourself in the Mission District, where art and entrepreneurship collide in inspiring ways.\n\nFinally, visit Alcatraz Island—a stark reminder that transformation is possible even from the most unforgiving places.\n\nWhat locations in your city inspire your own work or mindset? How can we draw from our surroundings to fuel innovation?",
+    "outputJson": {
+      "xThread": [
+        "San Francisco isn’t just another city. It’s a playground for creators and explorers.",
+        "1/ Visit the Golden Gate Bridge. Iconic for a reason. The views reset your perspective—literally and metaphorically.",
+        "2/ Explore the Mission District. Street art and startup vibes merge here. It’s where culture meets disruption.",
+        "3/ Head to Alcatraz Island. More than a prison tour—it's a dive into resilience and reinvention."
+      ],
+      "linkedin": "San Francisco continues to captivate those who build and innovate.\n\nBeyond the tech hubs and venture capital meetings, the city offers lessons in creativity, culture, and resilience.\n\nStart with the Golden Gate Bridge to appreciate the power of iconic vision.\n\nThen, immerse yourself in the Mission District, where art and entrepreneurship collide in inspiring ways.\n\nFinally, visit Alcatraz Island—a stark reminder that transformation is possible even from the most unforgiving places.\n\nWhat locations in your city inspire your own work or mindset? How can we draw from our surroundings to fuel innovation?"
+    },
+    "evidence": [],
+    "warnings": [],
+    "agentVersion": "v1.0.0",
+    "createdAt": "2026-04-25T07:53:18.184Z",
+    "updatedAt": "2026-04-25T07:53:18.184Z"
+  },
+  {
+    "id": "c1398109-9534-4a04-b343-d09a5c9772bc",
+    "format": "social",
+    "status": "review",
+    "topic": "top 3 things to do in Miami",
+    "sourceNotes": "",
+    "outputMarkdown": "# X / Twitter thread\n\n## 1\n\nMiami isn’t just beaches and nightlife. Here are the top 3 things every builder and tech pro should experience.\n\n## 2\n\n1/ Explore Wynwood Walls. This open-air street art museum isn’t just about vibrant murals — it’s a hub of creativity and innovation, perfect for inspiration.\n\n## 3\n\n2/ Visit the Phillip and Patricia Frost Museum of Science. The planetarium and aquarium fuse tech and nature, showcasing cutting-edge exhibitions that spark curiosity.\n\n## 4\n\n3/ Take a walk through the Miami Design District. It's a sleek environment for design, architecture, and tech-forward retail worth seeing firsthand.\n\n---\n\n# LinkedIn\n\nMiami offers a unique blend of creativity and innovation that resonates deeply with builders and tech professionals. Beyond its well-known beaches, three spots stand out: Wynwood Walls, a vibrant center of street art that fuels creative thinking; the Frost Museum of Science, where technology meets nature through advanced exhibits; and the Miami Design District, a showcase of cutting-edge design and architecture. Experiencing these places highlights how Miami is shaping a dynamic ecosystem for inspiration and progress.",
+    "outputJson": {
+      "xThread": [
+        "Miami isn’t just beaches and nightlife. Here are the top 3 things every builder and tech pro should experience.",
+        "1/ Explore Wynwood Walls. This open-air street art museum isn’t just about vibrant murals — it’s a hub of creativity and innovation, perfect for inspiration.",
+        "2/ Visit the Phillip and Patricia Frost Museum of Science. The planetarium and aquarium fuse tech and nature, showcasing cutting-edge exhibitions that spark curiosity.",
+        "3/ Take a walk through the Miami Design District. It's a sleek environment for design, architecture, and tech-forward retail worth seeing firsthand."
+      ],
+      "linkedin": "Miami offers a unique blend of creativity and innovation that resonates deeply with builders and tech professionals. Beyond its well-known beaches, three spots stand out: Wynwood Walls, a vibrant center of street art that fuels creative thinking; the Frost Museum of Science, where technology meets nature through advanced exhibits; and the Miami Design District, a showcase of cutting-edge design and architecture. Experiencing these places highlights how Miami is shaping a dynamic ecosystem for inspiration and progress."
+    },
+    "evidence": [],
+    "warnings": [],
+    "agentVersion": "v1.0.0",
+    "createdAt": "2026-04-25T07:35:01.988Z",
+    "updatedAt": "2026-04-25T07:35:01.988Z"
+  },
+  {
+    "id": "8fdb291b-995a-4c11-87ff-7f2e8f44562b",
+    "format": "social",
+    "status": "review",
+    "topic": "top 3 things to do in New York City",
+    "sourceNotes": "",
+    "outputMarkdown": "# X / Twitter thread\n\n## 1\n\nExploring New York City can feel overwhelming. Here are the top 3 essentials every builder and tech pro should experience.\n\n## 2\n\n1/ Walk the High Line: A masterclass in adaptive reuse. This elevated park transformed an old freight rail line into a vibrant public space blending nature and design innovation.\n\n## 3\n\n2/ Visit the Tenement Museum: Understand urban development and immigrant impact by diving into stories from NYC’s historic Lower East Side tenements.\n\n## 4\n\n3/ Check out the Oculus at World Trade Center: An architectural and engineering marvel symbolizing resilience and connectivity in the city’s financial hub.\n\n---\n\n# LinkedIn\n\nNew York City is a complex, layered urban environment that offers unique insights for builders and tech professionals alike. A visit to the High Line showcases how adaptive reuse can breathe new life into obsolete infrastructure, turning it into dynamic public space. The Tenement Museum provides perspective on urban density and the immigrant experience that shaped NYC’s neighborhoods — a reminder that built environments serve real lives and stories. Finally, the Oculus at the World Trade Center stands as a testament to innovation in structural engineering and symbolic design, emphasizing resilience in the face of adversity. These three experiences distill critical lessons in urbanism, design, and human-centered development.",
+    "outputJson": {
+      "xThread": [
+        "Exploring New York City can feel overwhelming. Here are the top 3 essentials every builder and tech pro should experience.",
+        "1/ Walk the High Line: A masterclass in adaptive reuse. This elevated park transformed an old freight rail line into a vibrant public space blending nature and design innovation.",
+        "2/ Visit the Tenement Museum: Understand urban development and immigrant impact by diving into stories from NYC’s historic Lower East Side tenements.",
+        "3/ Check out the Oculus at World Trade Center: An architectural and engineering marvel symbolizing resilience and connectivity in the city’s financial hub."
+      ],
+      "linkedin": "New York City is a complex, layered urban environment that offers unique insights for builders and tech professionals alike. A visit to the High Line showcases how adaptive reuse can breathe new life into obsolete infrastructure, turning it into dynamic public space. The Tenement Museum provides perspective on urban density and the immigrant experience that shaped NYC’s neighborhoods — a reminder that built environments serve real lives and stories. Finally, the Oculus at the World Trade Center stands as a testament to innovation in structural engineering and symbolic design, emphasizing resilience in the face of adversity. These three experiences distill critical lessons in urbanism, design, and human-centered development."
+    },
+    "evidence": [],
+    "warnings": [],
+    "agentVersion": "v1.0.0",
+    "createdAt": "2026-04-25T07:12:56.300Z",
+    "updatedAt": "2026-04-25T07:12:56.300Z"
+  },
+  {
+    "id": "71a00e8d-1018-4560-a832-67d11390e16b",
+    "format": "social",
+    "status": "review",
+    "topic": "top 5 places to visit in San Francisco",
+    "sourceNotes": "",
+    "outputMarkdown": "# X / Twitter thread\n\n## 1\n\nSan Francisco: a tech hub and a city of iconic landmarks. Here are the top 5 places to visit that blend culture, history, and innovation.\n\n## 2\n\n1/ Golden Gate Bridge — More than a photo op. Icon of engineering and resilience. Walk, bike, or just soak in the view.\n\n## 3\n\n2/ Alcatraz Island — A dive into history and mythology. It’s a former prison with stories that shaped a city.\n\n## 4\n\n3/ Fisherman’s Wharf — Tech meets tradition here. Fresh seafood, street performers, and a lively atmosphere.\n\n## 5\n\n4/ Mission District — The pulse of San Francisco’s arts and startup culture. Murals, coffee shops, and entrepreneurship collide.\n\n## 6\n\n5/ Exploratorium — A playground for curious minds. Science, perception, and technology under one roof.\n\n---\n\n# LinkedIn\n\nSan Francisco remains a beacon for innovators and creatives alike. Beyond its bustling tech scene, the city offers a rich tapestry of experiences worth exploring. From the engineering marvel of the Golden Gate Bridge and the historical intrigue of Alcatraz to the vibrant arts and startup culture in the Mission District, every corner has a story. For professionals seeking inspiration outside the screen, places like the Exploratorium provide hands-on learning that challenge how we perceive the world. Balancing work with exploration fuels the creativity and resilience that define this unique city.",
+    "outputJson": {
+      "xThread": [
+        "San Francisco: a tech hub and a city of iconic landmarks. Here are the top 5 places to visit that blend culture, history, and innovation.",
+        "1/ Golden Gate Bridge — More than a photo op. Icon of engineering and resilience. Walk, bike, or just soak in the view.",
+        "2/ Alcatraz Island — A dive into history and mythology. It’s a former prison with stories that shaped a city.",
+        "3/ Fisherman’s Wharf — Tech meets tradition here. Fresh seafood, street performers, and a lively atmosphere.",
+        "4/ Mission District — The pulse of San Francisco’s arts and startup culture. Murals, coffee shops, and entrepreneurship collide.",
+        "5/ Exploratorium — A playground for curious minds. Science, perception, and technology under one roof."
+      ],
+      "linkedin": "San Francisco remains a beacon for innovators and creatives alike. Beyond its bustling tech scene, the city offers a rich tapestry of experiences worth exploring. From the engineering marvel of the Golden Gate Bridge and the historical intrigue of Alcatraz to the vibrant arts and startup culture in the Mission District, every corner has a story. For professionals seeking inspiration outside the screen, places like the Exploratorium provide hands-on learning that challenge how we perceive the world. Balancing work with exploration fuels the creativity and resilience that define this unique city."
+    },
+    "evidence": [],
+    "warnings": [],
+    "agentVersion": "v1.0.0",
+    "createdAt": "2026-04-25T06:52:40.143Z",
+    "updatedAt": "2026-04-25T06:52:40.143Z"
+  },
+  {
+    "id": "e48f4897-66bd-43ab-a2bb-2e6701c778b0",
+    "format": "social",
+    "status": "review",
+    "topic": "Top 10 places to visit in New York City",
+    "sourceNotes": "",
+    "outputMarkdown": "# X / Twitter thread\n\n## 1\n\nNYC isn’t just a city; it’s an ecosystem of innovation, culture, and history. Here are the top 10 must-visit spots for anyone looking to experience its multifaceted energy.\n\n## 2\n\n1. The High Line: An elevated park built on a historic freight rail line — a masterclass in urban renewal and design.\n\n## 3\n\n2. The Met: More than an art museum, it’s a global archive of human creativity — a source of inspiration across disciplines.\n\n## 4\n\n3. Brooklyn Navy Yard: A hub for manufacturing and tech startups, showcasing how old industrial spaces can fuel new economies.\n\n## 5\n\n4. MoMA: See how modern art pushes boundaries, a reminder that innovation often comes from challenging norms.\n\n## 6\n\n5. Times Square: The pulse of NYC’s culture and media — a real-time display of how tech and commerce collide.\n\n## 7\n\n6. Hudson Yards: The newest neighborhood, blending tech, architecture, and urban planning into a live experiment.\n\n## 8\n\n7. Grand Central Terminal: Engineering marvel meets design elegance — a symbol of enduring infrastructure.\n\n## 9\n\n8. The Cloisters: A quiet retreat with medieval art, showing how history shapes contemporary cultural identity.\n\n## 10\n\n9. Coney Island: The original innovation playground with rides and attractions that influenced entertainment tech.\n\n## 11\n\n10. The New York Public Library: More than books, it’s a knowledge nexus for a city driven by information.\n\n---\n\n# LinkedIn\n\nNew York City is a living laboratory of innovation and culture, offering insights that resonate far beyond its borders. From the transformative urban design of the High Line to the entrepreneurial spirit alive at Brooklyn Navy Yard, each spot reflects a facet of the city’s relentless drive. Engaging with these places isn’t just tourism—it’s a study in how history, technology, art, and infrastructure coalesce to create dynamic urban ecosystems. For tech professionals and builders, exploring NYC's landmarks provides valuable lessons in adaptability, creativity, and long-term thinking.",
+    "outputJson": {
+      "xThread": [
+        "NYC isn’t just a city; it’s an ecosystem of innovation, culture, and history. Here are the top 10 must-visit spots for anyone looking to experience its multifaceted energy.",
+        "1. The High Line: An elevated park built on a historic freight rail line — a masterclass in urban renewal and design.",
+        "2. The Met: More than an art museum, it’s a global archive of human creativity — a source of inspiration across disciplines.",
+        "3. Brooklyn Navy Yard: A hub for manufacturing and tech startups, showcasing how old industrial spaces can fuel new economies.",
+        "4. MoMA: See how modern art pushes boundaries, a reminder that innovation often comes from challenging norms.",
+        "5. Times Square: The pulse of NYC’s culture and media — a real-time display of how tech and commerce collide.",
+        "6. Hudson Yards: The newest neighborhood, blending tech, architecture, and urban planning into a live experiment.",
+        "7. Grand Central Terminal: Engineering marvel meets design elegance — a symbol of enduring infrastructure.",
+        "8. The Cloisters: A quiet retreat with medieval art, showing how history shapes contemporary cultural identity.",
+        "9. Coney Island: The original innovation playground with rides and attractions that influenced entertainment tech.",
+        "10. The New York Public Library: More than books, it’s a knowledge nexus for a city driven by information."
+      ],
+      "linkedin": "New York City is a living laboratory of innovation and culture, offering insights that resonate far beyond its borders. From the transformative urban design of the High Line to the entrepreneurial spirit alive at Brooklyn Navy Yard, each spot reflects a facet of the city’s relentless drive. Engaging with these places isn’t just tourism—it’s a study in how history, technology, art, and infrastructure coalesce to create dynamic urban ecosystems. For tech professionals and builders, exploring NYC's landmarks provides valuable lessons in adaptability, creativity, and long-term thinking."
+    },
+    "evidence": [],
+    "warnings": [],
+    "agentVersion": "v1.0.0",
+    "createdAt": "2026-04-25T06:42:41.400Z",
+    "updatedAt": "2026-04-25T06:42:41.400Z"
+  },
+  {
+    "id": "c19ea3d8-8d2e-4b7a-8b3f-e54ec529bb1a",
+    "format": "summary",
+    "status": "review",
+    "topic": "Social Media",
+    "sourceNotes": "",
+    "sourceUrl": "https://arxiv.org/pdf/2604.21786",
+    "pdfUrl": "",
+    "outputMarkdown": "The paper \"From Codebooks to VLMs\" by Prasse et al. explores the use of vision-language models (VLMs) for analyzing climate change imagery on social media, particularly on X (formerly Twitter). The authors benchmark six VLMs and 15 zero-shot CLIP-like models using two datasets: a smaller expert-annotated set and a larger corpus of over 1.2 million images. They find that the Gemini-3.1-flash-lite model excels in capturing population-level trends despite individual inaccuracies. The study highlights the importance of tailored prompt design and taxonomy for model performance and calls for comprehensive evaluation frameworks in automated image classification. The authors provide access to their datasets, ClimateCT and ClimateTV, which focus on visual representations of climate change, particularly polar bears. They analyze image diversity and annotation quality, revealing challenges in classifying nuanced categories. The research emphasizes the role of visual content in shaping public perceptions of climate change and acknowledges the need for human validation in certain contexts. Overall, it underscores the complexity of visual data in climate change communication and ongoing research in this area.",
+    "outputJson": null,
+    "evidence": [],
+    "warnings": [],
+    "createdAt": "2026-04-25T06:41:18.410Z",
+    "updatedAt": "2026-04-25T06:41:18.410Z"
+  },
+  {
+    "id": "3489a5cb-f963-4e1e-97cf-000456126103",
+    "format": "social",
+    "status": "review",
+    "topic": "Top places to visit in San Francisco ",
+    "sourceNotes": "Make something fun for twitter",
+    "outputMarkdown": "## X\n\nExplore San Francisco's gems: Walk the iconic Golden Gate Bridge, visit lively Fisherman's Wharf, ride a historic cable car, and unwind in Golden Gate Park. Don’t miss the stunning views from Twin Peaks! #Travel #SanFrancisco #Adventure\n\n## LinkedIn\n\n**Discover the Top Places to Visit in San Francisco!** Whether you’re a first-time visitor or returning, San Francisco offers a vibrant mix of iconic landmarks and hidden treasures. Explore the breathtaking Golden Gate Bridge, feel the hustle and bustle at Fisherman's Wharf, and take a nostalgic ride on the famous cable cars. Don’t forget to immerse yourself in nature at Golden Gate Park and capture panoramic city views from Twin Peaks. Each spot showcases the city’s unique charm and history, making your visit unforgettable. Ready to plan your trip? Explore San Francisco’s top attractions and create lasting memories in this dynamic city. Share your favorite SF spots or travel tips below! #SanFrancisco #TravelTips #CityExploration",
+    "outputJson": {
+      "x": "Explore San Francisco's gems: Walk the iconic Golden Gate Bridge, visit lively Fisherman's Wharf, ride a historic cable car, and unwind in Golden Gate Park. Don’t miss the stunning views from Twin Peaks! #Travel #SanFrancisco #Adventure",
+      "linkedin": "**Discover the Top Places to Visit in San Francisco!** Whether you’re a first-time visitor or returning, San Francisco offers a vibrant mix of iconic landmarks and hidden treasures. Explore the breathtaking Golden Gate Bridge, feel the hustle and bustle at Fisherman's Wharf, and take a nostalgic ride on the famous cable cars. Don’t forget to immerse yourself in nature at Golden Gate Park and capture panoramic city views from Twin Peaks. Each spot showcases the city’s unique charm and history, making your visit unforgettable. Ready to plan your trip? Explore San Francisco’s top attractions and create lasting memories in this dynamic city. Share your favorite SF spots or travel tips below! #SanFrancisco #TravelTips #CityExploration"
+    },
+    "evidence": [
+      {
+        "id": "06396754-ad0b-45af-8945-79f94833edf6",
+        "claim": "Top places to visit in San Francisco : supporting note 1",
+        "sourceLabel": "Source notes",
+        "sourceRef": "note:1",
+        "excerpt": "Make something fun for twitter",
+        "sourceType": "note",
+        "verified": false,
+        "confidence": 0.74
+      }
+    ],
+    "warnings": [],
+    "agentVersion": "v1.0.0",
+    "createdAt": "2026-04-25T06:00:55.078Z",
+    "updatedAt": "2026-04-25T06:00:55.078Z"
+  },
+  {
+    "id": "4eab374d-d922-4576-8055-18ff96a575f7",
+    "format": "summary",
+    "status": "review",
+    "topic": "Climate change",
+    "sourceNotes": "",
+    "sourceUrl": "https://arxiv.org/pdf/2604.21786",
+    "pdfUrl": "",
+    "outputMarkdown": "The paper \"From Codebooks to VLMs\" by Prasse et al. explores the use of vision-language models (VLMs) to analyze climate change imagery on social media, particularly on X (formerly Twitter). The authors benchmark six VLMs and 15 zero-shot CLIP-like models using two datasets: a smaller expert-annotated set and a larger corpus of over 1.2 million images. They find that the Gemini-3.1-flash-lite model excels in capturing population-level trends, despite moderate accuracy for individual images. The study underscores the importance of tailored prompt design and rigorous evaluation in automated image classification, while also addressing the gap in research focused on visual content in climate change communication. The authors provide access to their datasets, ClimateCT and ClimateTV, which emphasize diverse visual representations. They analyze visual diversity and classification challenges, noting strong performance in broad categories but lower precision for nuanced labels. The paper concludes by highlighting the critical role of visuals in shaping public perceptions of climate change.",
+    "outputJson": null,
+    "evidence": [],
+    "warnings": [],
+    "createdAt": "2026-04-25T05:57:16.782Z",
+    "updatedAt": "2026-04-25T05:57:16.782Z"
+  },
+  {
+    "id": "66373eeb-7917-4a9b-96a2-e0d603dec490",
+    "format": "summary",
+    "status": "review",
+    "topic": "Climate change",
+    "sourceNotes": "",
+    "sourceUrl": "https://arxiv.org/pdf/2604.21786",
+    "pdfUrl": "",
+    "outputJson": null,
+    "evidence": [],
+    "createdAt": "2026-04-25T05:40:17.614Z",
+    "updatedAt": "2026-04-25T05:40:17.614Z"
+  },
+  {
+    "id": "e25a12b0-ca0f-4fa4-b91b-9bb0b5fd1186",
+    "format": "summary",
+    "status": "review",
+    "topic": "Climate change",
+    "sourceNotes": "",
+    "sourceUrl": "https://arxiv.org/pdf/2604.21786",
+    "pdfUrl": "",
+    "outputJson": null,
+    "evidence": [],
+    "createdAt": "2026-04-25T05:23:03.583Z",
+    "updatedAt": "2026-04-25T05:23:03.583Z"
+  },
+  {
+    "id": "b14eeabc-415b-4f73-9f29-acd484afc7a9",
+    "format": "summary",
+    "status": "review",
+    "topic": "Climate change",
+    "sourceNotes": "",
+    "sourceUrl": "https://arxiv.org/pdf/2604.21786",
+    "pdfUrl": "",
+    "outputJson": null,
+    "evidence": [],
+    "createdAt": "2026-04-25T04:55:38.029Z",
+    "updatedAt": "2026-04-25T04:55:38.029Z"
+  },
+  {
+    "id": "0fe3733c-1fa5-4f06-a006-8b815cf7940c",
+    "format": "summary",
+    "status": "review",
+    "topic": "Climate Change",
+    "sourceNotes": "",
+    "sourceUrl": "https://arxiv.org/pdf/2604.21786",
+    "pdfUrl": "",
+    "outputJson": null,
+    "evidence": [],
+    "createdAt": "2026-04-25T02:44:57.524Z",
+    "updatedAt": "2026-04-25T02:44:57.524Z"
+  },
+  {
+    "id": "3989733e-fd8c-4d09-b88e-e9666bf87eba",
+    "format": "summary",
+    "status": "review",
+    "topic": "Climate change",
+    "sourceNotes": "",
+    "sourceUrl": "https://arxiv.org/pdf/2604.21786",
+    "pdfUrl": "",
+    "outputJson": null,
+    "evidence": [],
+    "createdAt": "2026-04-25T02:24:08.686Z",
+    "updatedAt": "2026-04-25T02:24:08.686Z"
+  },
+  {
+    "id": "70853d31-3896-43d0-9257-99c05102d8bf",
+    "format": "summary",
+    "status": "review",
+    "topic": "Climate Change ",
+    "sourceNotes": "",
+    "sourceUrl": "https://arxiv.org/pdf/2604.21786",
+    "pdfUrl": "",
+    "outputMarkdown": "# Summary on Climate Change from the Provided Source\n\nUnfortunately, the input source content appears to be heavily corrupted or not properly extracted text from the PDF file at https://arxiv.org/pdf/2604.21786. The content consists mostly of garbled characters, incomplete sentences, and partial metadata references without coherent context or readable scientific data.\n\n## Reasoning\n- The extracted content contains mostly unreadable characters and broken PDF internals.\n- No meaningful paragraphs, figures, or scientific discussion on climate change can be derived.\n- There is no identifiable abstract, introduction, methodology, results, or conclusions section visible.\n\n## Suggestion\n- Please provide a clean or correctly parsed version of the document text or a summary.\n- Alternatively, request a general summary on climate change based on other accessible scientific literature.\n\nIf you want, I can provide a standard overview of climate change, its causes, impacts, and mitigation approaches based on current scientific consensus and reports from organizations like IPCC. Please confirm your preference.",
+    "outputJson": null,
+    "evidence": [
+      {
+        "id": "3fd3be3b-59bf-44e1-9b78-08a3820ab0c3",
+        "claim": "Climate Change : supporting note 1",
+        "sourceLabel": "Source notes",
+        "sourceRef": "note:1",
+        "excerpt": "https://arxiv.org/pdf/2604.21786",
+        "sourceType": "note",
+        "verified": false,
+        "confidence": 0.74
+      },
+      {
+        "id": "ad4e7431-85cb-42af-9c43-2047b75e3c1f",
+        "claim": "Climate Change : supporting note 2",
+        "sourceLabel": "Source notes",
+        "sourceRef": "note:2",
+        "excerpt": "k8\\�_\u0006�˾\fb,C��\u0001�5��\u0006���|_�y˱��",
+        "sourceType": "note",
+        "verified": false,
+        "confidence": 0.74
+      }
+    ],
+    "warnings": [],
+    "agentVersion": "v1.0.0",
+    "createdAt": "2026-04-25T01:41:53.304Z",
+    "updatedAt": "2026-04-25T01:41:53.304Z"
+  },
+  {
+    "id": "49d854c4-821f-46f9-84bb-f77f73e9f3ee",
+    "format": "blog",
+    "status": "review",
+    "topic": "how to be the best software engineer",
+    "sourceNotes": "",
+    "pdfUrl": "",
+    "outputMarkdown": "# How to Be the Best Software Engineer\n\nBecoming the best software engineer is a journey filled with continuous learning, adaptability, and creative problem-solving. Whether you're just starting out or looking to elevate your career, mastering the right skills and mindsets can set you apart in this competitive and fast-evolving field.\n\n## Master Fundamental Concepts\nBefore diving into frameworks and tools, it's crucial to have a strong grasp of the foundational concepts of computer science. This includes understanding data structures, algorithms, and system design. These fundamentals enable you to write efficient, scalable code and troubleshoot complex issues effectively.\n\n## Embrace Lifelong Learning\nTechnology evolves at a rapid pace. The best software engineers commit to lifelong learning by staying updated with the latest programming languages, software development methodologies, and industry trends. Engaging with online courses, attending workshops, and participating in developer communities can keep your skills sharp and relevant.\n\n## Write Clean and Maintainable Code\nBeyond just making things work, exceptional engineers focus on writing clean, readable, and maintainable code. This involves following best practices, consistent code style, thorough documentation, and unit testing. Clean code not only improves collaboration but also eases future enhancements and debugging.\n\n## Cultivate Soft Skills and Collaboration\nTechnical expertise is only part of the equation. Communication, teamwork, and problem-solving skills are essential for working effectively in diverse teams and delivering impactful software solutions. Being open to feedback, mentoring others, and understanding user needs also contribute to professional growth.\n\n## Conclusion\nBecoming the best software engineer takes dedication to both technical mastery and personal development. By grounding yourself in core principles, embracing continuous learning, writing quality code, and fostering strong collaboration skills, you position yourself to thrive and lead in the dynamic world of software engineering.",
+    "outputJson": null,
+    "evidence": [],
+    "warnings": [
+      "Blog evidence is light. Add notes or a source URL for stronger verification."
+    ],
+    "agentVersion": "v1.0.0",
+    "createdAt": "2026-04-25T01:19:01.476Z",
+    "updatedAt": "2026-04-25T01:19:01.476Z"
+  },
+  {
+    "id": "bf25012d-9118-4363-8e3e-006b45a481e7",
+    "format": "summary",
+    "status": "review",
+    "topic": "Analyzing values with tech",
+    "sourceNotes": "",
+    "sourceUrl": "https://assets.anthropic.com/m/18d20cca3cde3503/original/Values-in-the-Wild-Paper.pdf",
+    "pdfUrl": "",
+    "outputMarkdown": "- **Topic:** Analyzing values with technology\n\n- **Summary:**\n  The paper \"Values in the Wild\" discusses a novel framework for uncovering and analyzing human values using technological tools. It explores how emerging AI and computational methods can be leveraged to identify, evaluate, and align with human values in diverse real-world contexts. The approach combines social science methodologies and machine learning techniques to interpret complex value systems from varied data sources.\n\n- **Key Points:**\n  - Values are complex, context-dependent, and often implicit in human behavior.\n  - Traditional methods for assessing values rely heavily on qualitative approaches, which can be complemented and scaled with technology.\n  - Machine learning and AI can be applied to large datasets (e.g., text, social media, decision logs) to detect patterns reflecting value orientations.\n  - Aligning AI systems with nuanced human values requires continuous interdisciplinary collaboration.\n  - The research highlights challenges such as ethical considerations, data biases, and interpretability.\n\n- **Implications:**\n  Utilizing technology to analyze values can improve AI alignment, inform policy, and foster better human-machine interactions by grounding systems in genuine human priorities and ethical principles.\n\nFor full details, refer to the original paper: https://assets.anthropic.com/m/18d20cca3cde3503/original/Values-in-the-Wild-Paper.pdf",
+    "outputJson": null,
+    "evidence": [
+      {
+        "id": "224b3fec-5f02-4785-ab4a-b18379f3a2ed",
+        "claim": "Analyzing values with tech: source URL provided",
+        "sourceLabel": "https://assets.anthropic.com/m/18d20cca3cde3503/original/Values-in-the-Wild-Paper.pdf",
+        "sourceRef": "https://assets.anthropic.com/m/18d20cca3cde3503/original/Values-in-the-Wild-Paper.pdf",
+        "excerpt": "User supplied this URL as a primary source.",
+        "sourceType": "url",
+        "verified": false,
+        "confidence": 0.8
+      }
+    ],
+    "warnings": [
+      "Maximum call stack size exceeded"
+    ],
+    "agentVersion": "v1.0.0",
+    "createdAt": "2026-04-25T01:11:32.555Z",
+    "updatedAt": "2026-04-25T01:11:32.555Z"
+  },
+  {
+    "id": "7db6103b-3ccf-40f1-b08d-7b973fb83a5b",
+    "format": "social",
+    "status": "review",
+    "topic": "Being a good community manager in tech",
+    "sourceNotes": "Providing value to others, being a connector ",
+    "outputMarkdown": "## X\n\nBeing a great community manager in tech means providing real value and connecting people. It’s about fostering authentic relationships, sharing insights, and creating a space where collaboration thrives. Your impact is measured by how well you bring people together to grow and innovate.\n\n## LinkedIn\n\n**Mastering the Art of Tech Community Management**\n\nBeing a successful community manager in the tech industry goes beyond just moderating forums or organizing events. It’s about consistently providing value to your community members and acting as a connector who facilitates meaningful relationships. Whether it’s sharing relevant insights, answering questions, or introducing people with complementary skills, your role is vital in driving collaboration and innovation.\n\nA strong community thrives when members feel supported, understood, and engaged. By focusing on their needs and creating opportunities for knowledge exchange, you build trust and foster a culture of continuous growth. If you’re passionate about tech and community building, remember that your true impact lies in the connections you enable and the value you create every day.\n\nWant to learn more about becoming an exceptional tech community manager? Let’s connect and discuss best practices!",
+    "outputJson": {
+      "x": "Being a great community manager in tech means providing real value and connecting people. It’s about fostering authentic relationships, sharing insights, and creating a space where collaboration thrives. Your impact is measured by how well you bring people together to grow and innovate.",
+      "linkedin": "**Mastering the Art of Tech Community Management**\n\nBeing a successful community manager in the tech industry goes beyond just moderating forums or organizing events. It’s about consistently providing value to your community members and acting as a connector who facilitates meaningful relationships. Whether it’s sharing relevant insights, answering questions, or introducing people with complementary skills, your role is vital in driving collaboration and innovation.\n\nA strong community thrives when members feel supported, understood, and engaged. By focusing on their needs and creating opportunities for knowledge exchange, you build trust and foster a culture of continuous growth. If you’re passionate about tech and community building, remember that your true impact lies in the connections you enable and the value you create every day.\n\nWant to learn more about becoming an exceptional tech community manager? Let’s connect and discuss best practices!"
+    },
+    "evidence": [
+      {
+        "id": "4b4315db-8dd1-42c1-af15-625ea99c4040",
+        "claim": "Being a good community manager in tech: supporting note 1",
+        "sourceLabel": "Source notes",
+        "sourceRef": "note:1",
+        "excerpt": "Providing value to others, being a connector",
+        "sourceType": "note",
+        "verified": false,
+        "confidence": 0.74
+      }
+    ],
+    "warnings": [],
+    "agentVersion": "v1.0.0",
+    "createdAt": "2026-04-25T00:50:26.401Z",
+    "updatedAt": "2026-04-25T00:50:26.401Z"
+  },
+  {
+    "id": "30565c7f-97e5-4406-9716-47bf31441f34",
+    "format": "blog",
+    "status": "review",
+    "topic": "Research bacteria",
+    "sourceNotes": "",
+    "sourceUrl": "https://arxiv.org/pdf/2604.21655",
+    "pdfUrl": "",
+    "outputMarkdown": "# Exploring the Fascinating World of Research Bacteria\n\nBacteria, though microscopic, are powerhouses of biology that play crucial roles in ecosystems, health, and industry. Recent research continues to uncover their incredible diversity and capabilities, revealing insights that could transform medicine, environmental science, and biotechnology.\n\n## Understanding Bacterial Diversity\n\nBacteria are among the most diverse organisms on Earth, inhabiting virtually every environment from deep-sea vents to the human gut. Modern research uses genomic sequencing to uncover new bacterial species and understand how they adapt to their environments. This diversity is key to their resilience and utility.\n\n## Bacteria in Medicine and Health\n\nResearch bacteria are central to medical science. They can be both beneficial and harmful—while some strains cause infections, others are vital for digestion and immune function. Scientists are exploring how engineered bacteria might deliver targeted therapies or combat antibiotic resistance, offering hope for new treatments.\n\n## Environmental Roles of Bacteria\n\nBacteria are essential players in nutrient cycling and environmental balance. They help decompose organic matter, fix nitrogen in soils, and even clean up pollutants through bioremediation. Studying these processes reveals ways to harness bacteria for sustainable environmental solutions.\n\n## Cutting-Edge Techniques in Bacterial Research\n\nInnovations like CRISPR gene editing and advanced microscopy are revolutionizing bacterial research. These tools allow precise manipulation and observation, helping researchers understand bacterial functions at the molecular level and develop novel applications.\n\n## Conclusion\n\nThe study of bacteria continues to be a frontier of scientific discovery. By deepening our understanding of these tiny organisms, we open doors to breakthroughs in medicine, environmental management, and technology. For those curious about the microscopic world, bacterial research promises exciting insights and innovations ahead.\n\n*Source: arXiv.org (https://arxiv.org/pdf/2604.21655)*",
+    "outputJson": null,
+    "evidence": [
+      {
+        "id": "d6e955c0-ee4a-4d60-90a1-3f34e5aa8288",
+        "claim": "Research bacteria: source URL provided",
+        "sourceLabel": "https://arxiv.org/pdf/2604.21655",
+        "sourceRef": "https://arxiv.org/pdf/2604.21655",
+        "excerpt": "User supplied this URL as a primary source.",
+        "sourceType": "url",
+        "verified": false,
+        "confidence": 0.8
+      },
+      {
+        "id": "8f40f986-a1a8-4a50-9f46-d525f4764594",
+        "claim": "Research bacteria: suggested source",
+        "sourceLabel": "Max Planck Society",
+        "sourceRef": "https://en.wikipedia.org/wiki/Max_Planck_Society",
+        "excerpt": "Research Materials: Max Planck Society Archive",
+        "sourceType": "web",
+        "verified": false,
+        "confidence": 0.58
+      }
+    ],
+    "warnings": [],
+    "agentVersion": "v1.0.0",
+    "createdAt": "2026-04-25T00:36:18.251Z",
+    "updatedAt": "2026-04-25T00:38:48.709Z"
+  },
+  {
+    "id": "f8ab9b61-2f0c-423b-aa46-4c6c04210d5a",
+    "format": "summary",
+    "status": "review",
+    "topic": "Nasa",
+    "sourceNotes": "",
+    "sourceUrl": "https://www.jpl.nasa.gov/news/nasa-rover-finds-clue-to-mars-past-and-environment-for-life/",
+    "pdfUrl": "",
+    "outputMarkdown": "### NASA Rover Finds Clue to Mars' Past and Environment for Life\n\n- NASA's Spirit Mars Rover discovered rocks containing high concentrations of magnesium iron carbonate, indicating a wet, non-acidic ancient environment on Mars that may have been favorable for life.\n- This carbonate deposit was found in a rock outcrop named Comanche and constitutes about one-fourth of the rock's volume — ten times higher than previous Martian carbonate detections.\n- Carbonates form in near-neutral pH conditions with liquid water and dissolve in acid, thus indicating a less acidic ancient environment compared to other previously found acidic water evidence on Mars.\n- Multiple spectrometers onboard Spirit, including the Moessbauer spectrometer and Alpha Particle X-ray Spectrometer, helped confirm the carbonate presence through interlocking mineralogical and elemental data.\n- Detecting substantial carbonate deposits supports theories that Mars had a thicker, CO2-rich atmosphere and warmer climate in the past, possibly allowing for habitable conditions.\n- The finding addresses longstanding questions about the fate of ancient Martian atmospheric CO2 — whether it escaped to space or was trapped in surface minerals like carbonates.\n- Spirit's mission revealed challenges such as dust contamination on instruments that had to be corrected to verify these mineral signatures.\n\n#### Additional Context:\n- NASA's twin Mars rovers, Spirit and Opportunity, landed in 2004 with initial three-month missions; Spirit has been inactive since 2010 due to winter power constraints.\n- Opportunity continues exploring, moving toward the Endeavour crater.\n- The study confirming these findings was published in the journal *Science* on June 3, 2010.\n\nFor further details, visit NASA’s Mars Exploration Rovers site: http://www.nasa.gov/rovers",
+    "outputJson": null,
+    "evidence": [
+      {
+        "id": "0f98137d-ed1e-4424-a7f7-c8600e1af79e",
+        "claim": "Nasa: supporting note 1",
+        "sourceLabel": "Source notes",
+        "sourceRef": "note:1",
+        "excerpt": "NASA Rover Finds Clue to Mars' Past and Environment for Life",
+        "sourceType": "note",
+        "verified": false,
+        "confidence": 0.74
+      },
+      {
+        "id": "8f8b75f9-8a1b-413d-9de8-146ce2bda16d",
+        "claim": "Nasa: supporting note 2",
+        "sourceLabel": "Source notes",
+        "sourceRef": "note:2",
+        "excerpt": "Jet Propulsion Laboratory",
+        "sourceType": "note",
+        "verified": false,
+        "confidence": 0.74
+      }
+    ],
+    "warnings": [],
+    "agentVersion": "v1.0.0",
+    "createdAt": "2026-04-25T00:34:02.097Z",
+    "updatedAt": "2026-04-25T00:34:02.097Z"
+  }
+]
