@@ -1,9 +1,11 @@
-import { JSDOM } from "jsdom";
-import { Readability } from "@mozilla/readability";
-
 import { clipText } from "@/lib/utils";
 
 export async function extractArticleFromUrl(url: string) {
+  const [{ JSDOM }, { Readability }] = await Promise.all([
+    import("jsdom"),
+    import("@mozilla/readability"),
+  ]);
+
   const response = await fetch(url, {
     headers: {
       "User-Agent":
@@ -49,4 +51,3 @@ export function chunkText(input: string, chunkSize = 3000, overlap = 300) {
 
   return chunks;
 }
-
