@@ -39,6 +39,11 @@ export async function POST(request: Request) {
     if (pdfSource && isPdfSource) {
       console.log("PDF detected:", pdfSource);
 
+      const pythonSummaryServiceUrl = process.env.PYTHON_SUMMARY_SERVICE_URL;
+      if (!pythonSummaryServiceUrl) {
+        throw new Error("PYTHON_SUMMARY_SERVICE_URL is not configured");
+      }
+
       const pdfRes = await fetch(pdfSource);
 
       if (!pdfRes.ok) {
@@ -50,7 +55,7 @@ export async function POST(request: Request) {
       const formData = new FormData();
       formData.append("file", pdfBlob, "source.pdf");
 
-      const pythonRes = await fetch(process.env.PYTHON_SUMMARY_SERVICE_URL, {
+      const pythonRes = await fetch(`${pythonSummaryServiceUrl.replace(/\/$/, "")}/summarize`, {
         method: "POST",
         body: formData,
       });
