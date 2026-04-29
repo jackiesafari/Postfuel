@@ -1,6 +1,6 @@
 # PostFuel
 
-PostFuel is a content Machine created as a Next.js 14 App Router project for generating and reviewing AI-assisted content across four formats:
+PostFuel is a content machine created as a Next.js 14 App Router project for generating and reviewing AI-assisted content across four formats:
 
 - Blog drafts
 - Code walkthroughs
