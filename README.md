@@ -117,58 +117,7 @@ Summary generation supports:
 
 If the Python service is not configured, the app still works, but uploaded PDFs do not go through a full PyMuPDF pipeline.
 
-## Environment variables
 
-Create a `.env.local` file in the project root.
-
-### Minimum useful setup
-
-```bash
-OPENAI_API_KEY=your_openai_key
-```
-
-This enables model-backed generation for the four agents.
-
-### Optional storage setup
-
-```bash
-NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
-SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
-BLOB_READ_WRITE_TOKEN=your_vercel_blob_token
-```
-
-### Optional Python summary service
-
-```bash
-PYTHON_SUMMARY_SERVICE_URL=http://localhost:8000
-```
-
-Important detail:
-
-- The code currently expects to call `${PYTHON_SUMMARY_SERVICE_URL}/summarize`
-- For PDF uploads, it sends `multipart/form-data`
-- For text or URL summaries, it sends JSON
-
-So if you run a custom Python service locally, it should expose:
-
-- `POST /summarize`
-
-and accept both:
-
-- JSON requests for text or URL summaries
-- multipart file uploads for PDF summaries
-
-## What `PYTHON_SUMMARY_SERVICE_URL` actually is
-
-`PYTHON_SUMMARY_SERVICE_URL` is not something you download from this repo. It is the base URL of a separate Python summarization service that you host yourself.
-
-Examples:
-
-- Local development: `http://localhost:8000`
-- Railway: `https://your-summary-service.up.railway.app`
-- Render: `https://your-summary-service.onrender.com`
-
-The current repo does not include that Python service implementation. The Next.js app is already wired to call it if you provide the URL.
 
 ## Local development
 
@@ -200,28 +149,6 @@ npm run lint
 npm run build
 ```
 
-## Key files to read first
 
-- `src/app/page.tsx`
-- `src/components/studio-form.tsx`
-- `src/components/review-client.tsx`
-- `src/lib/agents.ts`
-- `src/lib/draft-store.ts`
-- `src/lib/summary.ts`
 
-## Current implementation notes
-
-- The project is usable without external infra because it has local fallbacks for drafts, uploads, and AI output.
-- The review page supports sharing via generated links, not direct OAuth posting.
-- Evidence is attached per draft item and can be marked verified in the UI.
-- URL summarization is more complete than PDF summarization unless the external Python service is configured.
-
-## Recommended next step
-
-If you want the PDF summarizer to be production-ready, the next practical task is to create the separate Python microservice that:
-
-- extracts PDF text with PyMuPDF
-- chunks content into 3,000-token windows with overlap
-- runs map-reduce summarization
-- returns a `summary` or `outputMarkdown` payload from `POST /summarize`
 

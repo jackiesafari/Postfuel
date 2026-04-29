@@ -4,7 +4,6 @@ import { v4 as uuid } from "uuid";
 import { AGENT_VERSION, hasOpenAIConfig, hasPythonSummaryService } from "@/lib/config";
 import { suggestWebSources, evidenceFromSource } from "@/lib/research";
 import { MENTIONABLE_SOURCE_PROFILES } from "@/lib/source-profiles";
-import { chunkText, extractArticleFromUrl } from "@/lib/summary";
 import {
   AgentResult,
   BlogAgentRequest,
@@ -375,6 +374,10 @@ ${sentences[3] || "Interpret the significance, caveats, and next questions."}`;
   return `${sentences.slice(0, 4).join(" ")}`.trim();
 }
 
+async function loadSummaryUtils() {
+  return import("@/lib/summary");
+}
+
 async function summarizeWithPythonService(request: {
   topic: string;
   sourceUrl?: string;
@@ -428,6 +431,7 @@ export async function generateSummary(request: SummaryAgentRequest): Promise<Age
 
   if (request.sourceUrl) {
     try {
+      const { extractArticleFromUrl } = await loadSummaryUtils();
       const article = await extractArticleFromUrl(request.sourceUrl);
       sourceText = [article.title, article.byline, article.excerpt, article.content]
         .filter(Boolean)
@@ -469,7 +473,9 @@ export async function generateSummary(request: SummaryAgentRequest): Promise<Age
         "You are a summarization agent. Return JSON with outputMarkdown only. Support executive bullet mode, standard prose, and deep IMRaD mode. If the content appears scientific, preserve the paper framing.",
         JSON.stringify({
           ...request,
-          chunks: chunkText(sourceText || request.topic, 3000, 300).slice(0, 5),
+          chunks: (await loadSummaryUtils())
+            .chunkText(sourceText || request.topic, 3000, 300)
+            .slice(0, 5),
         }),
         { outputMarkdown: fallbackMarkdown }
       );

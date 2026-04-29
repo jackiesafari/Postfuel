@@ -1,4 +1,5 @@
 import { promises as fs } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 import { createClient } from "@supabase/supabase-js";
@@ -6,7 +7,9 @@ import { createClient } from "@supabase/supabase-js";
 import { hasSupabaseConfig } from "@/lib/config";
 import { Draft, EvidenceItem } from "@/lib/types";
 
-const dataDir = path.join(process.cwd(), "data");
+const dataDir = process.env.VERCEL
+  ? path.join(os.tmpdir(), "content-machine-data")
+  : path.join(process.cwd(), "data");
 const draftsFile = path.join(dataDir, "drafts.json");
 
 type DraftPatch = Partial<Omit<Draft, "id" | "createdAt">>;
